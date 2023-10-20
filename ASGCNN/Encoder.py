@@ -74,7 +74,7 @@ class Graph_data_loader():
         Creat graph data from excel files and vasp structures or load graph data from bin files
 
         Parameters:
-            - data_excel: excel that contains structure names and targets / str, path to the excel file
+            - data_excel: excel or csv that contains structure names and targets / str, path to the excel or csv file
             - encoders: Structure Encoders or bin files that store the graphs / list
             - file_path: file paths where the vasp structures are stored, using None for bin files reading / list
             - file_columns: column names in the excels that record the name of the vasp structures, using None for bin files reading / list
@@ -84,7 +84,7 @@ class Graph_data_loader():
             - file_path, file_columns and encoders correspond one to one to different types of graphs of the same structure
         '''
         # init
-        df = pd.read_excel(data_excel)
+        df = pd.read_csv(data_excel, index_col=0) if data_excel.split('.')[1] == 'csv' else pd.read_excel(data_excel, index_col=0)
         graph_typ_number = len(encoders)
         self.graph_typ_number = graph_typ_number
 
