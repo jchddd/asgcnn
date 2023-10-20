@@ -461,3 +461,63 @@ class HybLoss(th.nn.Module):
             loss3 = th.mean(loss3 * w)
         loss = self.w1 * (loss1 + loss2) + self.w2 * loss3
         return loss
+
+#not_freeze_dict=['pred_adsb.layer.0.weight','pred_adsb.layer.0.bias','pred_adsb.layer.1.weight','pred_adsb.layer.1.bias',
+#                 'pred_site.layer.0.weight','pred_site.layer.0.bias','pred_site.layer.1.weight','pred_site.layer.1.bias',]
+#                  'fc_layers.0.layer.0.weight','fc_layers.0.layer.0.bias','fc_layers.0.layer.1.weight','fc_layers.0.layer.1.bias',
+#                  'fc_layers.1.layer.0.weight','fc_layers.1.layer.0.bias','fc_layers.1.layer.1.weight','fc_layers.1.layer.1.bias',
+#                  'fc_layers.2.layer.0.weight','fc_layers.2.layer.0.bias','fc_layers.2.layer.1.weight','fc_layers.2.layer.1.bias',
+#                  'fc_atten_mlp.layer.0.weight','fc_atten_mlp.layer.0.bias','fc_atten_mlp.layer.1.weight','fc_atten_mlp.layer.1.bias',
+#                  'fc_atten_bn.weight','fc_atten_bn.bias']
+#def freeze_model(model, not_freeze_dict):
+#    for (name,param) in model.named_parameters():
+#        if name not in not_freeze_dict:
+#            param.requires_grad=False
+#        else:
+#            pass
+#    return model
+#SA=freeze_model(SA,not_freeze_dict)
+
+#import hyperopt
+#from hyperopt import hp, fmin, tpe, Trials, partial
+#from hyperopt.early_stop import no_progress_loss
+#
+#search_params={
+#    'conv_num': hp.choice('conv_num',[1,2,3,4,5]),
+#    'adsb_eml': hp.quniform('adsb_eml',60,201,10),
+#    'slab_eml': hp.quniform('slab_eml',60,201,10),
+#    'fcly_1em': hp.quniform('fcly_1em',60,201,10),
+#    'fcly_2em': hp.quniform('fcly_2em',10,161,10),
+#    'fcly_3em': hp.quniform('fcly_3em',10,101,10),
+#    'loss_w': hp.uniform('loss_w',0.001,1),
+#}
+#
+#def run_opt_in_para_set(params):
+#    setup_seed(66666)
+#    Loader_train, Loader_valid, Loader_test = load_data()
+#    
+#    Loader_train.batch_size=256
+#    fcl = [int(params['fcly_1em']),int(params['fcly_2em']),int(params['fcly_3em'])]
+#    SA = AGCNN(101,6,int(params['adsb_eml']),101,8,int(params['slab_eml']),params['conv_num'],fcl,'Ce')
+#    
+#    t=Trainer_MC(SA, Loader_train, Loader_valid, Loader_test, 0.01, 'AdamW', 'cos', 200,0.001)
+#    t.Metric = MulLoss_MC(1-params['loss_w'], params['loss_w'])
+#    t.train_(50)
+#    
+#    return t.calculate_static()['valid']['mae']
+#
+#def param_hyperopt(max_evals=66):
+#    trials=Trials()
+#    
+#    early_stop=no_progress_loss(100)
+#    
+#    params_best= fmin(run_opt_in_para_set,
+#                    space=search_params,
+#                    algo=tpe.suggest,
+#                    max_evals=max_evals,
+#                    verbose=True,
+#                    trials=trials,
+#                    early_stop_fn=early_stop)
+#    return params_best, trials
+#
+#param_hyperopt(360)
