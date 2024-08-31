@@ -1,5 +1,15 @@
 # ASGCNN
 This repository contains an implementation of the ASGCNN (Adsorbate-Site Graph Convolutional Neural Network) that predicts the adsorption energies with the help of classification tasks for adsorbate types and adsorption sites of slab structures.
+# Requirment
+- torch
+- dgl
+- igraph
+- sklearn
+- pymatgen
+- matplotlib
+- tqdm
+- numpy
+- pandas
 # Citation
 If you use 'ASGCNN', please cite us using
 ```
