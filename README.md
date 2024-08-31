@@ -1,5 +1,8 @@
 # ASGCNN
 This repository contains an implementation of the ASGCNN (Adsorbate-Site Graph Convolutional Neural Network) that predicts the adsorption energies with the help of classification tasks for adsorbate types and adsorption sites of slab structures.
+<div align="center">
+<img src="https://github.com/jchddd/asgcnn/achitecture.png"><br>
+</div>
 # Requirment
 - torch
 - dgl
@@ -19,9 +22,9 @@ This repository contains an implementation of the ASGCNN (Adsorbate-Site Graph C
 - pretrained: Pretrained models. There are a total of five models learned in an ensemble method, and they predict together to provide the uncertainty of the prediction results.
 - structures: VASP structure files for calculation and graph structure generation.
 # Tutorials
-- xxx
+- Query data: Query Heusler alloy data from OQMD: [Query data.ipynb](https://github.com/jchddd/asgcnn/blob/main/Query data.ipynb)
 - Batch construction of adsorption models and analysis of VASP results: This part is done through custom [scripts](https://github.com/jchddd/scripts)
-- Use pre-trained model or train a new model from scratch: [tutorials.ipynb](https://github.com/jchddd/asgcnn/blob/main/tutorials.ipynb)
+- Use the pre-trained model or train a new model from scratch: [tutorials.ipynb](https://github.com/jchddd/asgcnn/blob/main/tutorials.ipynb)
 # Citation
 If you use 'ASGCNN', please cite us using
 ```
