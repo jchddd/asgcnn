@@ -17,13 +17,13 @@ This repository contains an implementation of the ASGCNN (Adsorbate-Site Graph C
 - pandas
 - qmpy_rester
 # Overview
-- ASGCNN/[Encoder.py](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Encoder.py):  Generate graph structure from VASP structure file and encode node and edge features.
-- ASGCNN/[Model.py](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Model.py): Pytorch implementation of the ASGCNN model.
-- ASGCNN/[Traniner.py](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Trainer.py): A module that calls the GNN model for training and prediction.
-- data: Stores graph structures and target quantities for network training. Graphs are stored as .bin files in the dgl package.
-- figures: Pictures drawn in Python in the article. Some of the drawings require custom [scripts](https://github.com/jchddd/scripts). Some code cannot run directly due to data size limitations.
-- pretrained: Pretrained models. There are five models learned in an ensemble method, and they predict together to provide the uncertainty of the prediction results.
-- structures: VASP structure files for calculation and graph structure generation.
+- **ASGCNN/**[**Encoder.py**](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Encoder.py):  Generate graph structure from VASP structure file and encode node and edge features.
+- **ASGCNN/**[**Model.py**](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Model.py): Pytorch implementation of the ASGCNN model.
+- **ASGCNN/**[**Traniner.py**](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Trainer.py): A module that calls the GNN model for training and prediction.
+- **data**: Stores graph structures and targets for network training. Graphs are stored as .bin files in the dgl package.
+- **figures**: Pictures drawn in Python in the article. Some of the drawings require custom [scripts](https://github.com/jchddd/scripts). Some code cannot run directly due to data size limitations.
+- **pretrained**: Pretrained models. There are five models learned in an ensemble method, and they predict together to provide the uncertainty of the prediction results.
+- **structures**: VASP structure files for calculation and graph structure generation.
 # Tutorials
 - Query data: Query Heusler alloy data from OQMD: [Query_data.ipynb](https://github.com/jchddd/asgcnn/blob/main/Query_data.ipynb)
 - Batch construction of adsorption models and analysis of VASP results: This part is done through custom [scripts](https://github.com/jchddd/scripts)
