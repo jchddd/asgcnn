@@ -29,7 +29,7 @@ This repository contains an implementation of the ASGCNN (Adsorbate-Site Graph C
 - Batch construction of adsorption models and analysis of VASP results: This part is done through custom [scripts](https://github.com/jchddd/scripts)
 - Use the pre-trained model or train a new model from scratch: [tutorials.ipynb](https://github.com/jchddd/asgcnn/blob/main/tutorials.ipynb)
 # Citation
-If you use ASGCNN, please cite us using
+If you are interested in our work, you can read our literature, and cite us using
 ```
 @article{ZHOU2024160519,
 title = {Machine-learning-accelerated screening of Heusler alloys for nitrogen reduction reaction with graph neural network},
