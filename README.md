@@ -16,6 +16,7 @@ This repository contains an implementation of the ASGCNN (Adsorbate-Site Graph C
 - numpy
 - pandas
 - qmpy_rester
+- hyperopt
 # Overview
 - **ASGCNN/**[**Encoder.py**](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Encoder.py):  Generate graph structure from VASP structure file and encode node and edge features.
 - **ASGCNN/**[**Model.py**](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Model.py): Pytorch implementation of the ASGCNN model.
