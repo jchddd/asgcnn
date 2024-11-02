@@ -42,15 +42,17 @@ class Trainer():
 
     Parameters:
         - Module: the Pytorch Module
-        - Dataloader_train: Dataloader for training set
-        - Dataloader_valid: Dataloader for validation set
-        - Dataloader_test: Dataloader for test set
+        - Dataloader_train: Graph_data_loader for training set
+        - Dataloader_valid: Graph_data_loader for validation set
+        - Dataloader_test: Graph_data_loader for test set
         - init_lr: initial learning rate / float, default 0.1
-        - metric: loss function / str, 'mae', 'mse', 'rmse', 'hyb', 'wmae'
-        - metric_para: weight no hybrid loss function / float, default 0.5
-        - optimizer: optimizer type / str, 'SGD', 'Momentum', 'RMSprop', 'Adam', 'AdamW'
-        - scheduler: scheduler type / str, 'cos', 'step'
+        - metric: loss function type / str, in 'mae', 'mse', 'rmse', 'hyb', 'wmae'
+        - metric_para: weight on hybrid loss function / float, default 0.5
+        - optimizer: optimizer type / str, in 'SGD', 'Momentum', 'RMSprop', 'Adam', 'AdamW'
+        - scheduler: scheduler type / str, in 'cos', 'step'
         - scheduler_para: length of the periodicity of the learning rate changing / int, default 1000
+         in 'cos', it means the number of epochs in a cycle of learning rate from large to small
+         in 'step' it means the learning rate changes after how many epochs
         - weight_decay: weight_decay on optimizer / float, default 0.0
     '''
 
