@@ -26,9 +26,9 @@ This repository contains an implementation of the ASGCNN (Adsorbate-Site Graph C
 - **pretrained**: Pretrained models. There are five models learned in an ensemble method, and they predict together to provide the uncertainty of the prediction results.
 - **structures**: VASP structure files for calculation and graph structure generation.
 # Tutorials
-- Query data: Query Heusler alloy data from OQMD: [Query_data.ipynb](https://github.com/jchddd/asgcnn/blob/main/Query_data.ipynb)
-- Batch construction of adsorption models and analysis of VASP results: This part is done through custom [scripts](https://github.com/jchddd/scripts)
-- Use the pre-trained model or train a new model from scratch: [tutorials.ipynb](https://github.com/jchddd/asgcnn/blob/main/tutorials.ipynb)
+- Query data: Query Heusler alloy data from OQMD: [Tutorials_query_data.ipynb](https://github.com/jchddd/asgcnn/blob/main/Query_data.ipynb)
+- Batch construction of adsorption models and analysis of VASP results: This part is done through custom [Jworkflow scripts](https://github.com/jchddd/scripts)
+- Use the pre-trained model or train a new model from scratch: [Tutorials_model_training.ipynb](https://github.com/jchddd/asgcnn/blob/main/tutorials.ipynb)
 # Citation
 If you are interested in our work, you can read our literature, and cite us using
 ```
