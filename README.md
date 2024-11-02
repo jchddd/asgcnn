@@ -11,7 +11,8 @@ In parentheses is a version that is compatible after testing, current potential 
 - torchdata (0.7.0)
 - dgl (2.2.1)
 - igraph (0.11.8)
-- sklearn
+- networkx
+- scikit-learn
 - pymatgen
 - matplotlib
 - tqdm
