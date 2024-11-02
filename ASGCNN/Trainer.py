@@ -75,7 +75,7 @@ class Trainer():
         self.Dataloader_test = Dataloader_test
         # Metric
         self.metric = metric
-        self.Metric = {'mae': nn.SmoothL1Loss(), 'mse': nn.MSELoss(), 'rmse': RMSELoss(), 'hyb': HybLoss(metric_para), 'wmae': wMAE()}[metric].to(self.device)
+        self.Metric = {'mae': nn.SmoothL1Loss(beta=0.5), 'mse': nn.MSELoss(), 'rmse': RMSELoss(), 'hyb': HybLoss(metric_para), 'wmae': wMAE()}[metric].to(self.device)
         # Optimizer
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -400,15 +400,15 @@ class Trainer():
         plt.legend()
         plt.show()
     
-    def load_pretrained(self):
+    def load_pretrained(self, location='cuda'):
         for i in range(5):
             self.Modules.append(copy.deepcopy(self.Module))
             self.snapshot=True
-        self.Modules[0].load_state_dict(th.load(r'pretrained\ASGCNN0_dict.pkl'))
-        self.Modules[1].load_state_dict(th.load(r'pretrained\ASGCNN1_dict.pkl'))
-        self.Modules[2].load_state_dict(th.load(r'pretrained\ASGCNN2_dict.pkl'))
-        self.Modules[3].load_state_dict(th.load(r'pretrained\ASGCNN3_dict.pkl'))
-        self.Modules[4].load_state_dict(th.load(r'pretrained\ASGCNN4_dict.pkl'))
+        self.Modules[0].load_state_dict(th.load(r'pretrained\ASGCNN0_dict.pkl', map_location=th.device(location)))
+        self.Modules[1].load_state_dict(th.load(r'pretrained\ASGCNN1_dict.pkl', map_location=th.device(location)))
+        self.Modules[2].load_state_dict(th.load(r'pretrained\ASGCNN2_dict.pkl', map_location=th.device(location)))
+        self.Modules[3].load_state_dict(th.load(r'pretrained\ASGCNN3_dict.pkl', map_location=th.device(location)))
+        self.Modules[4].load_state_dict(th.load(r'pretrained\ASGCNN4_dict.pkl', map_location=th.device(location)))
 
 
 def weight_init(m):
@@ -423,11 +423,14 @@ def weight_init(m):
 class wMAE(th.nn.Module):
     def __init__(self):
         super(wMAE, self).__init__()
-        self.mae = nn.SmoothL1Loss(reduction='none')
+        self.mae = nn.SmoothL1Loss(reduction='none', beta=0.5)
 
     def forward(self, yp, y, w=None):
         loss = self.mae(yp, y)
-        loss = th.mean(loss * w)
+        if w is not None:
+            loss = th.mean(loss * w)
+        else:
+            loss = th.mean(loss)
         return loss
 
 
@@ -449,7 +452,7 @@ class HybLoss(th.nn.Module):
         self.w2 = th.Tensor([1 - weight]).to(self.device)
         self.cel1 = nn.CrossEntropyLoss()
         self.cel2 = nn.CrossEntropyLoss()
-        self.mae = nn.SmoothL1Loss(reduction='none')
+        self.mae = nn.SmoothL1Loss(reduction='none', beta=0.5)
 
     def forward(self, yp, y, w=None):
         loss1 = self.cel1(yp[:, :5], y[:, 0].long().squeeze())
