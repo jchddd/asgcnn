@@ -226,20 +226,25 @@ class Encoder_structure():
     Parameters:
         - cutoff: radius cutoff for searching neighbor atoms / float, default 3.36
         - pair_search_method: method for searching neighbor atoms / str, 'SGCNN', 'CGCNN', 'Voronoi' and 'Voronoi_incell'
-          CGCNN: bonding is determined by the distance between atoms, SGCNN: the original distance criterion is expanded to its sum with the radii of two atoms
-          Voronoi: use the Voronoi method implemented on pymatgen to judge connection and determined distance lkie CGCNN, Voronoi_incell: regardless of the periodic
+          CGCNN: bonding is determined by the distance between atoms.
+          SGCNN: bonding is determined by subtracting the radius from the distance between the atoms, a smaller cutoff should be used
+          Voronoi: use the Voronoi method implemented on pymatgen to judge connection and determined distance lkie CGCNN
+          Voronoi_incell: use the Vornoi method and regardless of the periodic
         - bond_restrict: add restrictions on bonding of specific elements / dict
-          default {'H': {'bond': [{'N', 'H'}], 'radius': 1.6}} means H can only form bonds with N and H that are less than 1.6 Å in length
+          default {'H': {'bond': [{'N', 'H'}], 'radius': 1.6}} it means bonding of H is being restricted. 
+          And H can only form bonds with N and H that are less than 1.6 Å in length.
         - bond_restrict_require: when the structure contains these specific elements, can bonding be restricted / dict, default {'N', 'H'}
-        - element_restrict: selecting certain elements,  only they and their neighbors will be preserved / dict, default {}
-        - element_restrict_mode: Mode for element restriction / str, 'atom', 'bond'
-          atom: only their neighbors will be retained, bond: further retain bonds between neighbors
-        - distance_restrict: selecting particular elements, only the atoms within a distance and the bonds between them are preserved / dict, default {}
+        - element_restrict: selecting certain elements, only they and their neighbors will be preserved / dict, default {}
+        - element_restrict_mode: mode for element restriction / str, 'atom', 'bond'
+          This parameter determines the degree to which information about these elements' neighbors is retained
+          atom (only): only bonds with their neighbors will be retained, bond (too): further retain bonds between their neighbors
+        - distance_restrict: selecting particular elements, only atoms and the bonds to them within a distance are preserved / dict, default {}
           like {'one_v': ['N', 'H'], 'threshold': 0.3} means atoms within (0.3 + radius of the atom + radius of N or H) Å of H or N nodes are retained
         - dataset: name of element feature dataset / excel or csv file, default 'Feature.csv'
         - drop_repeat_edge: whether to drop repeat edge / bool, default False
+          In general, there will be no repeat edges, this just to be on the safe side
     Cautions:
-        - The element and distance bonding restrictions can conflict with each other and lead to errors
+        - The element and distance bonding restrictions may conflict with each other and lead to errors, only one can be used at a time
     '''
     def __init__(self, cutoff=3.36,
                  pair_search_method='Voronoi',
@@ -417,10 +422,13 @@ class Encoder_edge():
 
     Parameters:
         - features: list of features / list, 'radius', 'bond', 'category', 'distance'
+          'radius': radius expanded on the basis function. 'bond': a simple int 1 represents bonding
+          'category': bonding type according to two node types. 'distance': min node graph distances of this edge to certain nodes.
         - rbf_pares: radius basic function parameters / list, default [60, 5], number of basic sets and cutoff. None for use radius itself as feature
-        - vertice_typs: use atomic number to distinguish node type for construction of category feature / (x, 2) list, default [[1, 7], []]
-        - distance_reference_element: the reference elements for calculating the distance feature / list, default [1, 7]
-        - distance_feature_length: total length for distance feature / int, default 6
+        - vertice_typs: category parameter. use atomic number to distinguish node type for construction of category feature / (x, 2) list
+          default [[1, 7], []], means edges with nodes all in 1, 7, nodes all not in 1, 7, and one node in 1, 7 will be in three category 
+        - distance_reference_element: distance parameter. the reference elements for calculating the distance feature / list, default [1, 7]
+        - distance_feature_length: distance parameter. total length for distance feature / int, default 6
     '''
     def __init__(self, features=['radius'],
                  rbf_pares=[60, 5],
