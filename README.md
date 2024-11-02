@@ -1,14 +1,16 @@
 # ASGCNN
-This repository contains an implementation of the ASGCNN (Adsorbate-Site Graph Convolutional Neural Network) that predicts the adsorption energies with the help of classification tasks for adsorbate types and adsorption sites of slab structures.
+This repository contains an implementation of the [ASGCNN](https://www.sciencedirect.com/science/article/pii/S0169433224012327) (Adsorbate-Site Graph Convolutional Neural Network) that predicts the adsorption energies with the help of classification tasks for adsorbate types and adsorption sites of slab structures.
 
 <div align="center">
 <img src="https://github.com/jchddd/asgcnn/blob/main/architecture.png"><br>
 </div>
 
 # Requirment
-- torch
-- dgl
-- igraph
+In parentheses is a version that is compatible after testing, current potential conflicts are from dgl and torch(torchdata).
+- torch (2.1.0)
+- torchdata (0.7.0)
+- dgl (2.2.1)
+- igraph (0.11.8)
 - sklearn
 - pymatgen
 - matplotlib
@@ -22,7 +24,7 @@ This repository contains an implementation of the ASGCNN (Adsorbate-Site Graph C
 - **ASGCNN/**[**Model.py**](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Model.py): Pytorch implementation of the ASGCNN model.
 - **ASGCNN/**[**Traniner.py**](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Trainer.py): A module that calls the GNN model for training and prediction.
 - **data**: Stores graph structures and targets for network training. Graphs are stored as .bin files in the dgl package.
-- **figures**: Pictures drawn in Python in the article. Some of the drawings require custom [scripts](https://github.com/jchddd/scripts). Some code cannot run directly due to data size limitations.
+- **figures**: Pictures drawn in Python in the article. Some of the drawings require custom [Jworkflow scripts](https://github.com/jchddd/scripts). Some code cannot run directly due to data size limitations.
 - **pretrained**: Pretrained models. There are five models learned in an ensemble method, and they predict together to provide the uncertainty of the prediction results.
 - **structures**: VASP structure files for calculation and graph structure generation.
 # Tutorials
