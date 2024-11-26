@@ -25,7 +25,7 @@ In parentheses is a version that is compatible after testing, current potential 
 - **ASGCNN/**[**Model.py**](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Model.py): Pytorch implementation of the ASGCNN model.
 - **ASGCNN/**[**Traniner.py**](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Trainer.py): A module that calls the GNN model for training and prediction.
 - **data**: Stores graph structures and targets for network training. Graphs are stored as .bin files in the dgl package.
-- **figures**: Pictures drawn in Python in the article. Some of the drawings require custom [Jworkflow scripts](https://github.com/jchddd/scripts/Jworkflow). Some code cannot run directly due to data size limitations.
+- **figures**: Pictures drawn in Python in the article. Some of the drawings require custom [Jworkflow scripts](https://github.com/jchddd/scripts/jworkflow). Some code cannot run directly due to data size limitations.
 - **pretrained**: Pretrained models. There are five models learned in an ensemble method, and they predict together to provide the uncertainty of the prediction results.
 - **structures**: VASP structure files for calculation and graph structure generation.
 # Tutorials
