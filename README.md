@@ -7,10 +7,10 @@ This repository contains an implementation of the [ASGCNN](https://www.sciencedi
 
 # Requirment
 In parentheses is a version that is compatible after testing, current potential conflicts are from dgl and torch(torchdata).
-- torch (2.1.0)
+- torch (2.1.0) (1.13.1 + cu117)
 - torchdata (0.7.0)
-- dgl (2.2.1)
-- igraph (0.11.8)
+- dgl (2.2.1) (1.0.1 + cu117)
+- igraph
 - networkx
 - scikit-learn
 - pymatgen
@@ -25,13 +25,14 @@ In parentheses is a version that is compatible after testing, current potential 
 - **ASGCNN/**[**Model.py**](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Model.py): Pytorch implementation of the ASGCNN model.
 - **ASGCNN/**[**Traniner.py**](https://github.com/jchddd/asgcnn/blob/main/ASGCNN/Trainer.py): A module that calls the GNN model for training and prediction.
 - **data**: Stores graph structures and targets for network training. Graphs are stored as .bin files in the dgl package.
-- **figures**: Pictures drawn in Python in the article. Some of the drawings require custom [Jworkflow scripts](https://github.com/jchddd/scripts). Some code cannot run directly due to data size limitations.
+- **figures**: Pictures drawn in Python in the article. Some of the drawings require custom [Jworkflow scripts](https://github.com/jchddd/scripts/Jworkflow). Some code cannot run directly due to data size limitations.
 - **pretrained**: Pretrained models. There are five models learned in an ensemble method, and they predict together to provide the uncertainty of the prediction results.
 - **structures**: VASP structure files for calculation and graph structure generation.
 # Tutorials
-- Query data: Query Heusler alloy data from OQMD: [Tutorials_query_data.ipynb](https://github.com/jchddd/asgcnn/blob/main/Query_data.ipynb)
+- Query data: Query Heusler alloy data from OQMD: [Tutorials_query_data.ipynb](https://github.com/jchddd/asgcnn/blob/main/Tutorials_query_data.ipynb)
 - Batch construction of adsorption models and analysis of VASP results: This part is done through custom [Jworkflow scripts](https://github.com/jchddd/scripts)
-- Use the pre-trained model or train a new model from scratch: [Tutorials_model_training.ipynb](https://github.com/jchddd/asgcnn/blob/main/tutorials.ipynb)
+- View graph data characteristics and load pre-trained models: [Tutorials_load_pre-trained.ipynb](https://github.com/jchddd/asgcnn/blob/main/Tutorials_load_pre-trained.ipynb)
+- Create graph dataset and train new model from scratch: [Tutorials_model_training.ipynb](https://github.com/jchddd/asgcnn/blob/main/Tutorials_model_training.ipynb)
 # Citation
 If you are interested in our work, you can read our literature, and cite us using
 ```
