@@ -30,7 +30,7 @@ In parentheses is a version that is compatible after testing, current potential 
 - **structures**: VASP structure files for calculation and graph structure generation.
 # Tutorials
 - Query data: Query Heusler alloy data from OQMD: [Tutorials_query_data.ipynb](https://github.com/jchddd/asgcnn/blob/main/Tutorials_query_data.ipynb)
-- Batch construction of adsorption models and analysis of VASP results: This part is done through custom [Jworkflow scripts](https://github.com/jchddd/scripts)
+- Batch construction of adsorption models and analysis of VASP results: This part is done through custom [Jworkflow scripts](https://github.com/jchddd/scripts/tree/main/jworkflow)
 - View graph data characteristics and load pre-trained models: [Tutorials_load_pre-trained.ipynb](https://github.com/jchddd/asgcnn/blob/main/Tutorials_load_pre-trained.ipynb)
 - Create graph dataset and train new model from scratch: [Tutorials_model_training.ipynb](https://github.com/jchddd/asgcnn/blob/main/Tutorials_model_training.ipynb)
 # Citation
