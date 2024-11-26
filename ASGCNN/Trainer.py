@@ -7,8 +7,9 @@ import random
 from tqdm.notebook import tqdm as tqdm
 import matplotlib.pyplot as plt
 import os
-from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score, multilabel_confusion_matrix, confusion_matrix, r2_score, mean_absolute_error, \
-    mean_squared_error
+from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score, multilabel_confusion_matrix, confusion_matrix, r2_score, mean_absolute_error, mean_squared_error, roc_curve, auc
+from sklearn.preprocessing import label_binarize
+from sklearn.multiclass import OneVsRestClassifier
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -37,25 +38,6 @@ def setup_seed(seed):
 
 
 class Trainer():
-    '''
-    Trainer
-
-    Parameters:
-        - Module: the Pytorch Module
-        - Dataloader_train: Graph_data_loader for training set
-        - Dataloader_valid: Graph_data_loader for validation set
-        - Dataloader_test: Graph_data_loader for test set
-        - init_lr: initial learning rate / float, default 0.1
-        - metric: loss function type / str, in 'mae', 'mse', 'rmse', 'hyb', 'wmae'
-        - metric_para: weight on hybrid loss function / float, default 0.5
-        - optimizer: optimizer type / str, in 'SGD', 'Momentum', 'RMSprop', 'Adam', 'AdamW'
-        - scheduler: scheduler type / str, in 'cos', 'step'
-        - scheduler_para: length of the periodicity of the learning rate changing / int, default 1000
-         in 'cos', it means the number of epochs in a cycle of learning rate from large to small
-         in 'step' it means the learning rate changes after how many epochs
-        - weight_decay: weight_decay on optimizer / float, default 0.0
-    '''
-
     def __init__(self,
                  Module,
                  Dataloader_train=None,
@@ -63,11 +45,32 @@ class Trainer():
                  Dataloader_test=None,
                  init_lr=0.1,
                  metric='mae',
-                 metric_para=0.5,
+                 metric_para={},
                  optimizer='RMSprop',
                  scheduler='cos',
                  scheduler_para=1000,
-                 weight_decay=0.0):
+                 weight_decay=0.0,
+                 target_dims=[1]):
+        '''
+        Trainer
+
+        Parameters:
+            - Module: the Pytorch Module
+            - Dataloader_train: Graph_data_loader for training set
+            - Dataloader_valid: Graph_data_loader for validation set
+            - Dataloader_test: Graph_data_loader for test set
+            - init_lr: initial learning rate / float, default 0.1
+            - metric: loss function type / str, in 'mae', 'mse', 'rmse', 'hyb', 'wmae'
+            - metric_para: parameters for hybrid loss function except target_dims / dict, default {}
+            - optimizer: optimizer type / str, in 'SGD', 'Momentum', 'RMSprop', 'Adam', 'AdamW'
+            - scheduler: scheduler type / str, in 'cos', 'step'
+            - scheduler_para: length of the periodicity of the learning rate changing / int, default 1000
+             in 'cos', it means the number of epochs in a cycle of learning rate from large to small
+             in 'step' it means the learning rate changes after how many epochs
+            - weight_decay: weight_decay on optimizer / float, default 0.0
+            - target_dims: dimensions for each target / float, default [1]
+        '''
+
         # Module
         self.device = th.device("cuda" if th.cuda.is_available() else "cpu")
         self.Module = Module.to(self.device)
@@ -77,7 +80,8 @@ class Trainer():
         self.Dataloader_test = Dataloader_test
         # Metric
         self.metric = metric
-        self.Metric = {'mae': nn.SmoothL1Loss(beta=0.5), 'mse': nn.MSELoss(), 'rmse': RMSELoss(), 'hyb': HybLoss(metric_para), 'wmae': wMAE()}[metric].to(self.device)
+        metric_para.update({'target_dims': target_dims}) if metric == 'hyb' else None
+        self.Metric = {'mae': nn.SmoothL1Loss, 'mse': nn.MSELoss, 'rmse': RMSELoss, 'hyb': HybLoss, 'wmae': wMAE}[metric](**metric_para).to(self.device)
         # Optimizer
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -96,6 +100,8 @@ class Trainer():
         self.snapshot = False
         self.snapshot_point = []
         self.Modules = []
+        # target
+        self.target_dims = target_dims
 
     def _load_optimizer(self, optimizer, lr, init_lr):
         if optimizer == 'SGD':
@@ -143,7 +149,7 @@ class Trainer():
         self.scheduler = 'cos'
         self.scheduler_para = epoch_each
 
-    def train(self, epoch):
+    def train(self, epoch, disable_tqdm=False):
         '''
         Strat training
 
@@ -157,7 +163,7 @@ class Trainer():
         Optimizer = self._load_optimizer(self.optimizer, self.last_lr, self.init_lr)
         Scheduler = self._load_scheduler(self.scheduler, Optimizer, self.scheduler_para, self.last_epoch)
         # start train
-        with tqdm(range(epoch), leave=False, unit='e', desc='Train epoch') as pbar:
+        with tqdm(range(epoch), leave=False, unit='e', desc='Train epoch', disable=disable_tqdm) as pbar:
             for e in range(epoch):  # loop epoch
                 # init
                 self.Module.train()
@@ -252,7 +258,7 @@ class Trainer():
 
         Parameters:
             - Dataloader: the Dataloader
-            - to_class: converts the 0 and 1 Boolean characteristics of a class into class information from 1 to x
+            - to_class: converts the probability of each classes into class information from 0 to x
             - return_uq: whether to return uq values / bool, default False
         '''
         if not self.snapshot:
@@ -263,16 +269,26 @@ class Trainer():
             for model in self.Modules:
                 predicts.append(self._get_prediction(model, Dataloader))
             predict = np.stack(predicts)
-            yp1 = np.mean(predict[:, :, :5], axis=0)
-            yp2 = np.mean(predict[:, :, 5:9], axis=0)
-            yp3 = np.mean(predict[:, :, 9], axis=0)
-            uq = np.std(predict[:, :, 9], axis=0)
-            if to_class:
-                _, yp1 = th.max(th.from_numpy(yp1), 1)
-                yp1 = yp1.unsqueeze(1).cpu().detach().numpy()
-                _, yp2 = th.max(th.from_numpy(yp2), 1)
-                yp2 = yp2.unsqueeze(1).cpu().detach().numpy()
-            predict = np.concatenate([yp1, yp2, yp3[:, np.newaxis]], axis=1)
+
+            yps = []
+            i_s = 0
+            i_e = self.target_dims[0]
+            for ti in range(len(self.target_dims)):
+                if ti != 0:
+                    i_s += self.target_dims[ti - 1]
+                    i_e += self.target_dims[ti]
+                if   self.target_dims[ti] > 1:
+                    ypc = np.mean(predict[:, :, i_s: i_e], axis=0)
+                    if to_class:
+                        _, ypc = th.max(th.from_numpy(ypc), 1)
+                        ypc = ypc.unsqueeze(1).cpu().detach().numpy()
+                    yps.append(ypc)
+                elif self.target_dims[ti] == 1:
+                    break
+            ypr = np.mean(predict[:, :, i_s:], axis=0)
+            yps.append(ypr) # [:, np.newaxis]
+            uq = np.std(predict[:, :, i_s:], axis=0)
+            predict = np.concatenate(yps, axis=1)
 
         elif self.snapshot and self.Module.task_typ == 'regre':
             predicts = []
@@ -297,11 +313,19 @@ class Trainer():
                 predicts.append(predict)
         predict = th.cat(predicts, dim=0)
         if to_class:
-            yp = predict
-            _, yp1 = th.max(yp[:, :5], 1)
-            _, yp2 = th.max(yp[:, 5:9], 1)
-            yp3 = yp[:, 9]
-            predict = th.cat([yp1.unsqueeze(1), yp2.unsqueeze(1), yp3.unsqueeze(1)], 1)
+            yps = []
+            i_s = 0
+            i_e = self.target_dims[0]
+            for ti in range(len(self.target_dims)):
+                if ti != 0:
+                    i_s += self.target_dims[ti - 1]
+                    i_e += self.target_dims[ti]
+                if   self.target_dims[ti] > 1:
+                    _, ypc = th.max(predict[:, i_s: i_e], 1)
+                    yps.append(ypc.unsqueeze(1))
+                elif self.target_dims[ti] == 1:
+                    yps.append(predict[:, i_s: i_e])
+            predict = th.cat(yps, 1)
         return predict.cpu().detach().numpy()
 
     def calculate_static(self):
@@ -309,63 +333,70 @@ class Trainer():
         keys = ['train', 'valid', 'test']
 
         if self.Module.task_typ == 'multy':
-            for i, dataloader in enumerate([self.Dataloader_train, self.Dataloader_valid, self.Dataloader_test]):
-                yp = th.Tensor(self.predict(dataloader))
+            for i, k in enumerate(keys):
+                dataloader = getattr(self, 'Dataloader_' + k)
+                if dataloader is not None:
+                    yp = th.Tensor(self.predict(dataloader))
 
-                _, yp1 = th.max(yp[:, :5], 1)
-                yp1 = yp1.cpu().detach().numpy().reshape(-1)
-                y1 = dataloader.target[:, 0].cpu().detach().numpy().reshape(-1)
-
-                _, yp2 = th.max(yp[:, 5:9], 1)
-                yp2 = yp2.cpu().detach().numpy().reshape(-1)
-                y2 = dataloader.target[:, 1].cpu().detach().numpy().reshape(-1)
-
-                yp3 = yp[:, 9].cpu().detach().numpy().reshape(-1)
-                y3 = dataloader.target[:, 2].cpu().detach().numpy().reshape(-1)
-
-                y1 = np.nan_to_num(y1, nan=6)
-                yp1 = np.nan_to_num(yp1, nan=6)
-                y2 = np.nan_to_num(y2, nan=6)
-                yp2 = np.nan_to_num(yp2, nan=6)
-                y3 = np.nan_to_num(y3, nan=6)
-                yp3 = np.nan_to_num(yp3, nan=6)
-
-                static[keys[i]] = {'f1_1': f1_score(y1, yp1, average='weighted'), 'f1_2': f1_score(y2, yp2, average='weighted'),
-                                   'ac_1': accuracy_score(y1, yp1), 'ac_2': accuracy_score(y2, yp2),
-                                   'pc_1': precision_score(y1, yp1, average='weighted'), 'pc_2': precision_score(y2, yp2, average='weighted'),
-                                   'rc_1': recall_score(y1, yp1, average='weighted'), 'rc_2': recall_score(y2, yp2, average='weighted'),
-                                   'r2': r2_score(y3, yp3), 'mae': mean_absolute_error(y3, yp3),
-                                   'mse': mean_squared_error(y3, yp3), 'rmse': np.sqrt(mean_squared_error(y3, yp3))}
-
+                    i_s = 0
+                    i_e = self.target_dims[0]
+                    for ti in range(len(self.target_dims)):
+                        if ti != 0:
+                            i_s += self.target_dims[ti - 1]
+                            i_e += self.target_dims[ti]
+                        if   self.target_dims[ti] > 1:
+                            _, ypc = th.max(yp[:, i_s: i_e], 1)
+                            ypc = ypc.cpu().detach().numpy().reshape(-1)
+                            yc = dataloader.target[:, ti].cpu().detach().numpy().reshape(-1)
+                            static[k].update(
+                                {'f1_' + str(ti): f1_score(yc, ypc, average='weighted'), 'ac_' + str(ti): accuracy_score(yc, ypc),
+                                 'pc_' + str(ti): precision_score(yc, ypc, average='weighted'), 'rc_' + str(ti): recall_score(yc, ypc, average='weighted')}
+                            )
+                        elif self.target_dims[ti] == 1:
+                            ypr = yp[:, i_s: i_e].cpu().detach().numpy().reshape(-1)
+                            yr = dataloader.target[:, ti].cpu().detach().numpy().reshape(-1)
+                            static[k].update(
+                                {'r2_' + str(ti): r2_score(yr, ypr), 'mae_' + str(ti): mean_absolute_error(yr, ypr),
+                                 'mse_' + str(ti): mean_squared_error(yr, ypr), 'rmse_' + str(ti): np.sqrt(mean_squared_error(yr, ypr))}
+                            )
+    
         elif self.Module.task_typ == 'regre':
-            for i, dataloader in enumerate([self.Dataloader_train, self.Dataloader_valid, self.Dataloader_test]):
-                yp = th.Tensor(self.predict(dataloader)).cpu().detach().numpy().reshape(-1)
-                y = dataloader.target.cpu().detach().numpy().reshape(-1)
-                y = y.reshape(-1, 1)
-                yp = yp.reshape(-1, 1)
-                static[keys[i]] = {'r2': r2_score(y, yp), 'mae': mean_absolute_error(y, yp),
-                                   'mse': mean_squared_error(y, yp), 'rmse': np.sqrt(mean_squared_error(y, yp))}
+            target_num = len(self.target_dims)
+            for i, k in enumerate(keys):
+                dataloader = getattr(self, 'Dataloader_' + k)
+                if dataloader is not None:
+                    yp = th.Tensor(self.predict(dataloader)).cpu().detach().numpy().reshape(-1)
+                    y = dataloader.target.cpu().detach().numpy().reshape(-1)
+                    y = y.reshape(-1, target_num)
+                    yp = yp.reshape(-1, target_num)
+                    for j in range(target_num):
+                        static[k].update({'r2_' + str(j): r2_score(y[:, j], yp[:, j]), 'mae_' + str(j): mean_absolute_error(y[:, j], yp[:, j]),
+                                          'mse_' + str(j): mean_squared_error(y[:, j], yp[:, j]), 'rmse_' + str(j): np.sqrt(mean_squared_error(y[:, j], yp[:, j]))})
 
         return static
 
     def confusion_matrix(self, dataloader):
         Dataloader = {'train': self.Dataloader_train, 'valid': self.Dataloader_valid, 'test': self.Dataloader_test}[dataloader]
         yp = th.Tensor(self.predict(Dataloader))
+        cms = []
+        mcms = []
 
-        _, yp1 = th.max(yp[:, :5], 1)
-        yp1 = yp1.cpu().detach().numpy().reshape(-1)
-        y1 = Dataloader.target[:, 0].cpu().detach().numpy().reshape(-1)
-
-        _, yp2 = th.max(yp[:, 5:9], 1)
-        yp2 = yp2.cpu().detach().numpy().reshape(-1)
-        y2 = Dataloader.target[:, 1].cpu().detach().numpy().reshape(-1)
-
-        cm1 = confusion_matrix(y1, yp1)
-        cm2 = confusion_matrix(y2, yp2)
-        mcm1 = multilabel_confusion_matrix(y1, yp1)
-        mcm2 = multilabel_confusion_matrix(y2, yp2)
-
-        return cm1, cm2, mcm1, mcm2
+        i_s = 0
+        i_e = self.target_dims[0]
+        for ti in range(len(self.target_dims)):
+            if ti != 0:
+                i_s += self.target_dims[ti - 1]
+                i_e += self.target_dims[ti]
+            if   self.target_dims[ti] > 1:
+                _, ypc = th.max(yp[:, i_s: i_e], 1)
+                ypc = ypc.cpu().detach().numpy().reshape(-1)
+                yc = Dataloader.target[:, ti].cpu().detach().numpy().reshape(-1)
+                cms.append(confusion_matrix(yc, ypc))
+                mcms.append(multilabel_confusion_matrix(yc, ypc))
+            elif self.target_dims[ti] == 1:
+                break
+                
+        return cms, mcms
 
     def show_learn_curve(self):
         plt.figure(figsize=(6, 4))
@@ -375,34 +406,125 @@ class Trainer():
         plt.plot(range(len(self.losses_valid)), self.losses_valid, 'b', label='valid', zorder=1)
         plt.legend()
         plt.show()
-
-    def show_result(self):
-        # init figure
-        plt.figure(figsize=(6, 6))
-        plt.xlabel('DFT', fontsize=16)
-        plt.ylabel('predict', fontsize=16)
-        plt.plot([-10, 10], [-10, 10])
-        plt.axis([-4, 4, -4, 4])
-        # init
-        print_name = ['train:', 'valid', 'test']
-        colors = ['y', 'b', 'r']
-        # loop dataloader
-        for i, dataloader in enumerate([self.Dataloader_train, self.Dataloader_valid, self.Dataloader_test]):
-            # get yp
-            if self.Module.task_typ == 'regre':
-                yp = self.predict(dataloader)
-                y = dataloader.target.cpu().detach().numpy().reshape(-1)
-            elif self.Module.task_typ == 'multy':
-                yp = self.predict(dataloader, True)[:, 2]
-                y = dataloader.target[:, 2].cpu().detach().numpy().reshape(-1)
-            # cal static
-            plt.scatter(6, 6, c=colors[i], label=print_name[i])
-            # plot scatter
-            plt.scatter(y, yp, c=colors[i])
-        plt.legend()
+        
+    def show_lr(self):
+        plt.figure(figsize=(6, 4))
+        plt.xlabel('epoch', fontsize=16)
+        plt.ylabel('learning rate', fontsize=16)
+        plt.plot(self.lrs)
         plt.show()
+
+    def show_result(self, ti=0, dataset='test'):
+        if self.target_dims[ti] == 1:
+            maxv = max(self.Dataloader_train.target[:, ti]).cpu().item()
+            minv = min(self.Dataloader_train.target[:, ti]).cpu().item()
+            maxv = maxv + (maxv - minv) * 0.1
+            minv = minv - (maxv - minv) * 0.1
+            # init figure
+            plt.figure(figsize=(6, 6))
+            plt.xlabel('DFT', fontsize=16)
+            plt.ylabel('predict', fontsize=16)
+            plt.plot([-10, 10], [-10, 10])
+            plt.axis([minv, maxv, minv, maxv])
+            # init
+            print_name = ['train', 'valid', 'test']
+            colors = ['y', 'b', 'r']
+            # loop dataloader
+            for i, l in enumerate(print_name):
+                dataloader = getattr(self, 'Dataloader_' + l)
+                if dataloader is not None:
+                    # get yp
+                    yp = self.predict(dataloader, True)[:, ti]
+                    y = dataloader.target[:, ti].cpu().detach().numpy().reshape(-1)
+                    # cal static
+                    plt.scatter(6, 6, c=colors[i], label=print_name[i], ec='k',lw=0.6)
+                    # plot scatter
+                    plt.scatter(y, yp, c=colors[i], ec='k',lw=0.6)
+            plt.legend()
+            plt.show()
+        elif self.target_dims[ti] > 1:
+            i_s = 0
+            i_e = self.target_dims[0]
+            for i in range(len(self.target_dims)):
+                if i != 0:
+                    i_s += self.target_dims[i - 1]
+                    i_e += self.target_dims[i]
+                if i == ti:
+                    break
+            if dataset == 'test':
+                y_true = self.Dataloader_test.target[:, ti].cpu()
+                y_scores = self.predict(Dataloader=self.Dataloader_test)[:, i_s: i_e]
+            elif dataset == 'valid':
+                y_rue = self.Dataloader_valid.target[:, ti].cpu()
+                y_scores = self.predict(Dataloader=self.Dataloader_valid)[:, i_s: i_e]
+            elif dataset == 'train':
+                y_rue = self.Dataloader_train.target[:, ti].cpu()
+                y_scores = self.predict(Dataloader=self.Dataloader_train)[:, i_s: i_e]
+
+            # binary label
+            y_true_bin = label_binarize(y_true, classes=[0, 1, 2])
+            n_classes = y_true_bin.shape[1]
+            # calculate roc for each class
+            fpr = dict()
+            tpr = dict()
+            roc_auc = dict()
+            for i in range(n_classes):
+                fpr[i], tpr[i], _ = roc_curve(y_true_bin[:, i], y_scores[:, i])
+                roc_auc[i] = auc(fpr[i], tpr[i])
+            # calculate average roc
+            all_fpr = np.unique(np.concatenate([fpr[i] for i in range(n_classes)]))
+            mean_tpr = np.zeros_like(all_fpr)
+            for i in range(n_classes):
+                mean_tpr += np.interp(all_fpr, fpr[i], tpr[i])
+            mean_tpr /= n_classes
+
+            fpr["macro"] = all_fpr
+            tpr["macro"] = mean_tpr
+            roc_auc["macro"] = auc(fpr["macro"], tpr["macro"])
+            # plot roc for each class
+            plt.figure()
+            lw = 2
+            for i in range(n_classes):
+                plt.plot(fpr[i], tpr[i], lw=lw, label='ROC curve of class {0} (area = {1:0.2f})'.format(i, roc_auc[i]))
+            # plot average roc
+            plt.plot(fpr["macro"], tpr["macro"],
+                     label='Macro-average ROC curve (area = {0:0.2f})'.format(roc_auc["macro"]),
+                     color='navy', linestyle=':', linewidth=4)
+            # plot setting
+            plt.plot([0, 1], [0, 1], 'k--', lw=lw)
+            plt.xlim([0.0, 1.0])
+            plt.ylim([0.0, 1.05])
+            plt.xlabel('False Positive Rate')
+            plt.ylabel('True Positive Rate')
+            plt.title('Multi-class ROC curve')
+            plt.legend(loc="lower right")
+            plt.show()
     
-    def load_pretrained(self, location='cuda'):
+    def show_uq(self, ti=0, i_s=0, i_e=10, dataset='test'):
+        if dataset == 'test':
+            dataloader = self.Dataloader_test
+        elif dataset == 'valid':
+            dataloader = self.Dataloader_valid
+        elif dataset == 'train':
+            dataloader = self.Dataloader_train
+        
+        yp, uq = self.predict(dataloader, True, True)
+        true_values = dataloader.target[:, ti].cpu()[i_s: i_e]
+        predicted_values = yp[:, ti][i_s: i_e]
+        uncertainty = uq[:, ti][i_s: i_e]
+
+        fig, ax = plt.subplots()
+        ax.scatter(true_values, predicted_values, color='blue', label='Predictions')
+        ax.errorbar(true_values, predicted_values, xerr=uncertainty, yerr=uncertainty, fmt='o', color='red', ecolor='lightgray', capsize=5, label='Uncertainty')
+        ax.plot([min(true_values), max(true_values)], [min(true_values), max(true_values)], '--k', label='Perfect prediction')
+        ax.set_title('Predictions vs True Values with Uncertainty')
+        ax.set_xlabel('True Values')
+        ax.set_ylabel('Predicted Values')
+        ax.legend()
+        plt.show()
+
+    
+    def load_pretrained(self, location='cpu'):
         for i in range(5):
             self.Modules.append(copy.deepcopy(self.Module))
             self.snapshot=True
@@ -423,14 +545,15 @@ def weight_init(m):
 
 
 class wMAE(th.nn.Module):
-    def __init__(self):
+    def __init__(self, beta=1, wi=0):
         super(wMAE, self).__init__()
-        self.mae = nn.SmoothL1Loss(reduction='none', beta=0.5)
+        self.mae = nn.SmoothL1Loss(reduction='none', beta=beta)
+        self.wi = wi
 
     def forward(self, yp, y, w=None):
         loss = self.mae(yp, y)
         if w is not None:
-            loss = th.mean(loss * w)
+            loss = th.mean(loss * w[:, self.wi: self.wi + 1])
         else:
             loss = th.mean(loss)
         return loss
@@ -447,25 +570,38 @@ class RMSELoss(th.nn.Module):
 
 
 class HybLoss(th.nn.Module):
-    def __init__(self, weight=0.5):
+    def __init__(self, weight=[0.4, 0.4, 0.6], target_dims=[5, 4, 1], loss_para=None):
         super(HybLoss, self).__init__()
         self.device = th.device("cuda" if th.cuda.is_available() else "cpu")
-        self.w1 = th.Tensor([weight]).to(self.device)
-        self.w2 = th.Tensor([1 - weight]).to(self.device)
-        self.cel1 = nn.CrossEntropyLoss()
-        self.cel2 = nn.CrossEntropyLoss()
-        self.mae = nn.SmoothL1Loss(reduction='none', beta=0.5)
+        self.weight = th.Tensor(weight).to(self.device)
+        self.target_dims = target_dims
+        for ti, tl in enumerate(target_dims):
+            tv = 0
+            if   tl > 1:
+                setattr(self, 'cel_' + str(ti), nn.CrossEntropyLoss())
+                tv += tl
+            elif tl == 1:
+                beta = loss_para[ti] if loss_para is not None else 1
+                setattr(self, 'mae_' + str(ti), wMAE(beta=beta, wi=tl))
+                tv += tl
 
     def forward(self, yp, y, w=None):
-        loss1 = self.cel1(yp[:, :5], y[:, 0].long().squeeze())
-        loss2 = self.cel2(yp[:, 5:9], y[:, 1].long().squeeze())
-        loss3 = self.mae(yp[:, 9], y[:, 2])
-        if w is None:
-            loss3 = th.mean(loss3)
-        else:
-            loss3 = th.mean(loss3 * w)
-        loss = self.w1 * (loss1 + loss2) + self.w2 * loss3
-        return loss
+        i_s = 0
+        i_e = self.target_dims[0]
+        for ti in range(len(self.target_dims)):
+            if ti != 0:
+                i_s += self.target_dims[ti - 1]
+                i_e += self.target_dims[ti]
+            if   self.target_dims[ti] > 1:
+                loss = getattr(self, 'cel_' + str(ti))(yp[:, i_s: i_e], y[:, ti].long().squeeze())
+            elif self.target_dims[ti] == 1:
+                loss = getattr(self, 'mae_' + str(ti))(yp[:, i_s: i_e], y[:, ti: ti + 1], w)
+
+            if ti == 0:
+                loss_total = loss * self.weight[ti]
+            else:
+                loss_total += loss * self.weight[ti]
+        return loss_total
 
 #not_freeze_dict=['pred_adsb.layer.0.weight','pred_adsb.layer.0.bias','pred_adsb.layer.1.weight','pred_adsb.layer.1.bias',
 #                 'pred_site.layer.0.weight','pred_site.layer.0.bias','pred_site.layer.1.weight','pred_site.layer.1.bias',]
@@ -482,47 +618,3 @@ class HybLoss(th.nn.Module):
 #            pass
 #    return model
 #SA=freeze_model(SA,not_freeze_dict)
-
-#import hyperopt
-#from hyperopt import hp, fmin, tpe, Trials, partial
-#from hyperopt.early_stop import no_progress_loss
-#
-#search_params={
-#    'conv_num': hp.choice('conv_num',[1,2,3,4,5]),
-#    'adsb_eml': hp.quniform('adsb_eml',60,201,10),
-#    'slab_eml': hp.quniform('slab_eml',60,201,10),
-#    'fcly_1em': hp.quniform('fcly_1em',60,201,10),
-#    'fcly_2em': hp.quniform('fcly_2em',10,161,10),
-#    'fcly_3em': hp.quniform('fcly_3em',10,101,10),
-#    'loss_w': hp.uniform('loss_w',0.001,1),
-#}
-#
-#def run_opt_in_para_set(params):
-#    setup_seed(66666)
-#    Loader_train, Loader_valid, Loader_test = load_data()
-#    
-#    Loader_train.batch_size=256
-#    fcl = [int(params['fcly_1em']),int(params['fcly_2em']),int(params['fcly_3em'])]
-#    SA = AGCNN(101,6,int(params['adsb_eml']),101,8,int(params['slab_eml']),params['conv_num'],fcl,'Ce')
-#    
-#    t=Trainer_MC(SA, Loader_train, Loader_valid, Loader_test, 0.01, 'AdamW', 'cos', 200,0.001)
-#    t.Metric = MulLoss_MC(1-params['loss_w'], params['loss_w'])
-#    t.train_(50)
-#    
-#    return t.calculate_static()['valid']['mae']
-#
-#def param_hyperopt(max_evals=66):
-#    trials=Trials()
-#    
-#    early_stop=no_progress_loss(100)
-#    
-#    params_best= fmin(run_opt_in_para_set,
-#                    space=search_params,
-#                    algo=tpe.suggest,
-#                    max_evals=max_evals,
-#                    verbose=True,
-#                    trials=trials,
-#                    early_stop_fn=early_stop)
-#    return params_best, trials
-#
-#param_hyperopt(360)

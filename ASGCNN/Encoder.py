@@ -6,6 +6,7 @@ import dgl
 import os
 import math
 from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
 from pymatgen.core import Structure
 from dgl.data.utils import save_graphs, load_graphs
 from tqdm.notebook import tqdm as tqdm
@@ -69,7 +70,7 @@ class Graph_data_loader():
 
         return x, y
 
-    def load_data(self, data_excel, encoders, file_paths=None, file_columns=None, target=None, file_suffix='.vasp'):
+    def load_data(self, data_excel, encoders, file_paths=None, file_columns=None, target=None, file_suffix='.vasp', disable_tqdm=False):
         '''
         Creat graph data from excel files and vasp structures or load graph data from bin files
 
@@ -80,6 +81,7 @@ class Graph_data_loader():
             - file_columns: column names in the excels that record the name of the vasp structures, using None for bin files reading / list
             - target: column names in the data_excel that record targets, using None for prediction dataset / list
             - file_suffix: suffix of vasp structures / str, default '.vasp'
+            - disable_tqdm: disable tqdm or nor / bool, default False
         Cautions:
             - file_path, file_columns and encoders correspond one to one to different types of graphs of the same structure
         '''
@@ -102,7 +104,7 @@ class Graph_data_loader():
         # load graph from vasp file
         else:
             self.graphs = [[] for typ in range(graph_typ_number)]  # empty stored list
-            with tqdm(total=self.graph_typ_number * df.shape[0], unit='g', leave=False, desc='Load graph') as pbar:
+            with tqdm(total=self.graph_typ_number * df.shape[0], unit='g', leave=False, desc='Load graph', disable=disable_tqdm) as pbar:
                 for typ in range(graph_typ_number):
                     structure_list = df[file_columns[typ]].values  # get file list
                     encoder = encoders[typ]
@@ -134,15 +136,16 @@ class Graph_data_loader():
             target = th.Tensor(target).unsqueeze(1)
         self.target = target.to(self.device)
 
-    def apply_feature(self, encoder_element=[], encoder_edge=[]):
+    def apply_feature(self, encoder_element=[], encoder_edge=[], disable_tqdm=False):
         '''
         Function to add features to the graph
 
         Parameters:
             - encoder_element: Encoder_elements for node feature encoding / list
             - encoder_edge: Encoder_edges for edge feature encoding / list
+            - disable_tqdm: disable tqdm or nor / bool, default False
         '''
-        with tqdm(iterable=range(self.graph_typ_number * self.len), unit='g', leave=False, desc='Apply feature') as pbar:
+        with tqdm(iterable=range(self.graph_typ_number * self.len), unit='g', leave=False, desc='Apply feature', disable=disable_tqdm) as pbar:
             for t in range(self.graph_typ_number):
                 Encoder_element = encoder_element[t]
                 Encoder_edge = encoder_edge[t]
@@ -184,68 +187,61 @@ class Graph_data_loader():
         self.index = np.random.choice(self.index_ori, size=int(len(self.index_ori) * psamples), replace=False)
         self.len = len(self.index)
 
-    def get_effective_label_density(self, bin_number=100, target_column=0, ks=5, sigma=2):
+    def get_effective_label_density(self, bin_number=100, start_row=0, kss=5, sigmas=2):
         '''
         Function to calculate effective label density for target property
 
         Parameters:
             - bin_number: total bin number for label distribution / int, default 100
-            - target_column: target property column name / str
-            - ks: kernel window length / int default, 5
-            - sigma: sigma for gaussian kernel / float, 2
+            - start_row: index for where regression target property starts / int, default 0
+            - kss: kernel window length for each target / int for all the same or list for each, default, 5
+            - sigmas: sigma for gaussian kernel for each target / float for all the same or list for each , default 2
         '''
         self.use_ELD = True
-        preds = self.target[:, target_column].cpu().detach().numpy().reshape(-1)
-        sep_value = [min(preds) + (max(preds) - min(preds) + 0.001) / bin_number * (i + 1) for i in range(bin_number)]
-        bin_index_per_label = []
-        for target in preds:
-            for i, sepv in enumerate(sep_value):
-                if target < sepv:
-                    bin_index_per_label.append(i)
-                    break
-        self.bin_index = np.array(bin_index_per_label)
-        num_samples_of_bins = dict(Counter(bin_index_per_label))
-        emp_label_dist = np.array([num_samples_of_bins.get(i, 0) for i in range(bin_number)])
-        lds_kernel_window = get_lds_kernel_window(kernel='gaussian', ks=ks, sigma=sigma)
-        eff_label_dist = convolve1d(np.sqrt(emp_label_dist), weights=lds_kernel_window, mode='constant')
-        self.effective_label_density = eff_label_dist
-        weights = [np.float32(1 / x) for x in eff_label_dist]
-        scaling = len(weights) / np.sum(weights)
-        weights = [scaling * x for x in weights]
-        self.weights = th.Tensor(weights).unsqueeze(1).to(self.device)
+        regre_target_num = self.target.shape[1] - start_row
+        if type(kss) is not list:
+            kss = [kss for i in range(regre_target_num)]
+        if type(sigmas) is not list:
+            sigmas = [sigmas for i in range(regre_target_num)]
+        
+        all_weight = []
+        self.effective_label_density = []
+        for target_index in range(start_row, self.target.shape[1]):
+            ks = kss[target_index - start_row]
+            sigma = sigmas[target_index - start_row]
+            preds = self.target[:, target_index].cpu().detach().numpy().reshape(-1)
+            sep_value = [min(preds) + (max(preds) - min(preds) + 0.001) / bin_number * (i + 1) for i in range(bin_number)]
+            bin_index_per_label = []
+            for target in preds:
+                for i, sepv in enumerate(sep_value):
+                    if target < sepv:
+                        bin_index_per_label.append(i)
+                        break
+            self.bin_index = np.array(bin_index_per_label)
+            num_samples_of_bins = dict(Counter(bin_index_per_label))
+            emp_label_dist = np.array([num_samples_of_bins.get(i, 0) for i in range(bin_number)])
+            lds_kernel_window = get_lds_kernel_window(kernel='gaussian', ks=ks, sigma=sigma)
+            eff_label_dist = convolve1d(np.sqrt(emp_label_dist), weights=lds_kernel_window, mode='constant')
+            self.effective_label_density.append(eff_label_dist)
+            weights = [np.float32(1 / x) for x in eff_label_dist]
+            scaling = len(weights) / np.sum(weights)
+            weights = [scaling * x for x in weights]
+            all_weight.append(th.Tensor(weights).unsqueeze(1))
+        self.weights = th.cat(all_weight, dim=1).to(self.device)
 
     def get_LDS(self):
         bin_index = self.bin_index[self.current_index]
         return self.weights[bin_index]
-
+    
+    def show_effective_label_density(self, ti=0):
+        plt.plot(range(len(self.effective_label_density[ti])), self.effective_label_density[ti], marker='o')
+        plt.xlabel('Target value distribution range'); plt.ylabel('Effective label density')
+        
+    def show_weights(self, ti=0):
+        plt.scatter(range(len(self.effective_label_density[ti])), self.weights[:, ti].cpu())
+        plt.xlabel('Target value distribution range'); plt.ylabel('Weight')
 
 class Encoder_structure():
-    '''
-    Encoder for encoding structure to graph
-
-    Parameters:
-        - cutoff: radius cutoff for searching neighbor atoms / float, default 3.36
-        - pair_search_method: method for searching neighbor atoms / str, 'SGCNN', 'CGCNN', 'Voronoi' and 'Voronoi_incell'
-          CGCNN: bonding is determined by the distance between atoms.
-          SGCNN: bonding is determined by subtracting the radius from the distance between the atoms, a smaller cutoff should be used
-          Voronoi: use the Voronoi method implemented on pymatgen to judge connection and determined distance lkie CGCNN
-          Voronoi_incell: use the Vornoi method and regardless of the periodic
-        - bond_restrict: add restrictions on bonding of specific elements / dict
-          default {'H': {'bond': [{'N', 'H'}], 'radius': 1.6}} it means bonding of H is being restricted. 
-          And H can only form bonds with N and H that are less than 1.6 Å in length.
-        - bond_restrict_require: when the structure contains these specific elements, can bonding be restricted / dict, default {'N', 'H'}
-        - element_restrict: selecting certain elements, only they and their neighbors will be preserved / dict, default {}
-        - element_restrict_mode: mode for element restriction / str, 'atom', 'bond'
-          This parameter determines the degree to which information about these elements' neighbors is retained
-          atom (only): only bonds with their neighbors will be retained, bond (too): further retain bonds between their neighbors
-        - distance_restrict: selecting particular elements, only atoms and the bonds to them within a distance are preserved / dict, default {}
-          like {'one_v': ['N', 'H'], 'threshold': 0.3} means atoms within (0.3 + radius of the atom + radius of N or H) Å of H or N nodes are retained
-        - dataset: name of element feature dataset / excel or csv file, default 'Feature.csv'
-        - drop_repeat_edge: whether to drop repeat edge / bool, default False
-          In general, there will be no repeat edges, this just to be on the safe side
-    Cautions:
-        - The element and distance bonding restrictions may conflict with each other and lead to errors, only one can be used at a time
-    '''
     def __init__(self, cutoff=3.36,
                  pair_search_method='Voronoi',
                  bond_restrict={'H': {'bond': [{'N', 'H'}], 'radius': 1.6}},
@@ -256,6 +252,33 @@ class Encoder_structure():
                  dataset='ASGCNN/Element_feature.csv',
                  drop_repaet_edge=False,
                  ):
+        '''
+        Encoder for encoding structure to graph
+
+        Parameters:
+            - cutoff: radius cutoff for searching neighbor atoms / float, default 3.36
+            - pair_search_method: method for searching neighbor atoms / str, 'SGCNN', 'CGCNN', 'Voronoi' and 'Voronoi_incell'
+              CGCNN: bonding is determined by the distance between atoms.
+              SGCNN: bonding is determined by subtracting the radius from the distance between the atoms, a smaller cutoff should be used
+              Voronoi: use the Voronoi method implemented on pymatgen to judge connection and determined distance lkie CGCNN
+              Voronoi_incell: use the Vornoi method and regardless of the periodic
+            - bond_restrict: add restrictions on bonding of specific elements / dict
+              default {'H': {'bond': [{'N', 'H'}], 'radius': 1.6}} it means bonding of H is being restricted. 
+              And H can only form bonds with N and H that are less than 1.6 Å in length.
+            - bond_restrict_require: when the structure contains these specific elements, can bonding be restricted / dict, default {'N', 'H'}
+            - element_restrict: selecting certain elements, only they and their neighbors will be preserved / dict, default {}
+            - element_restrict_mode: mode for element restriction / str, 'atom', 'bond'
+              This parameter determines the degree to which information about these elements' neighbors is retained
+              atom (only): only bonds with their neighbors will be retained, bond (too): further retain bonds between their neighbors
+            - distance_restrict: selecting particular elements, only atoms and the bonds to them within a distance are preserved / dict, default {}
+              like {'one_v': ['N', 'H'], 'threshold': 0.3} means atoms within (0.3 + radius of the atom + radius of N or H) Å of H or N nodes are retained
+            - dataset: name of element feature dataset / excel or csv file, default 'Feature.csv'
+            - drop_repeat_edge: whether to drop repeat edge / bool, default False
+              In general, there will be no repeat edges, this just to be on the safe side
+        Cautions:
+            - The element and distance bonding restrictions may conflict with each other and lead to errors, only one can be used at a time
+        '''
+
         self.cutoff = cutoff
         self.pair_search_method = pair_search_method
         assert self.pair_search_method in ['SGCNN', 'CGCNN', 'Voronoi', 'Voronoi_incell'], 'Undefined pair search method !'
@@ -417,25 +440,26 @@ class Encoder_structure():
 
 
 class Encoder_edge():
-    '''
-    Encoder for encoding graph edge features
-
-    Parameters:
-        - features: list of features / list, 'radius', 'bond', 'category', 'distance'
-          'radius': radius expanded on the basis function. 'bond': a simple int 1 represents bonding
-          'category': bonding type according to two node types. 'distance': min node graph distances of this edge to certain nodes.
-        - rbf_pares: radius basic function parameters / list, default [60, 5], number of basic sets and cutoff. None for use radius itself as feature
-        - vertice_typs: category parameter. use atomic number to distinguish node type for construction of category feature / (x, 2) list
-          default [[1, 7], []], means edges with nodes all in 1, 7, nodes all not in 1, 7, and one node in 1, 7 will be in three category 
-        - distance_reference_element: distance parameter. the reference elements for calculating the distance feature / list, default [1, 7]
-        - distance_feature_length: distance parameter. total length for distance feature / int, default 6
-    '''
     def __init__(self, features=['radius'],
                  rbf_pares=[60, 5],
                  vertice_typs=[[1, 7], []],
                  distance_reference_element=[1, 7],
                  distance_feature_length=6,
                  ):
+        '''
+        Encoder for encoding graph edge features
+
+        Parameters:
+            - features: list of features / list, 'radius', 'bond', 'category', 'distance'
+              'radius': radius expanded on the basis function. 'bond': a simple int 1 represents bonding
+              'category': bonding type according to two node types. 'distance': min node graph distances of this edge to certain nodes.
+            - rbf_pares: radius basic function parameters / list, default [60, 5], number of basic sets and cutoff. None for use radius itself as feature
+            - vertice_typs: category parameter. use atomic number to distinguish node type for construction of category feature / (x, 2) list
+              default [[1, 7], []], means edges with nodes all in 1, 7, nodes all not in 1, 7, and one node in 1, 7 will be in three category 
+            - distance_reference_element: distance parameter. the reference elements for calculating the distance feature / list, default [1, 7]
+            - distance_feature_length: distance parameter. total length for distance feature / int, default 6
+        '''
+
         self.edge_features = features
         assert all([h_e in ['radius', 'bond', 'category', 'distance'] for h_e in features]), 'Undefined edge feature !'
         self.rbf_paras = rbf_pares
@@ -547,17 +571,6 @@ class Encoder_edge():
 
 
 class Encoder_element():
-    '''
-    Encoder for encoding graph element features
-
-    Parameters:
-        - dataset: name for element feature dataset / excel or csv file, default 'Element_feature.csv'
-        - elements: elements used in the study / list
-        - features: seleted features / list, all available features on dataset
-        - numerical_feature_length: feature length after numerical feature expand to one-hot type feature / int, default 10
-        - one_hot_to_Gaussian: whether to use polycentric gaussians to replace one-hot feature / bool, default False
-        - direct_use_feature_value: whether to direct use feature values as the feature / bool, default False
-    '''
     def __init__(self, dataset='ASGCNN/Element_feature.csv',
                  elements=['Ag', 'Al', 'As', 'Au', 'B', 'Bi', 'Cd', 'Co', 'Cr', 'Cu', 'Fe', 'Ga', 'Ge', 'Hf', 'In', 'Ir', 'Mn', 'Mo', 'Nb',
                            'Ni', 'Os', 'Pb', 'Pd', 'Pt', 'Rh', 'Ru', 'Sb', 'Sc', 'Si', 'Sn', 'Ta', 'Ti', 'Tl', 'V', 'W', 'Y', 'Zn', 'Zr', 'N', 'H'],
@@ -568,6 +581,18 @@ class Encoder_element():
                  bf_extend_magnitude=0.01,
                  floor_extend_magnitude=0.01
                  ):
+        '''
+        Encoder for encoding graph element features
+
+        Parameters:
+            - dataset: name for element feature dataset / excel or csv file, default 'Element_feature.csv'
+            - elements: elements used in the study / list
+            - features: seleted features / list, all available features on dataset
+            - numerical_feature_length: feature length after numerical feature expand to one-hot type feature / int, default 10
+            - one_hot_to_Gaussian: whether to use polycentric gaussians to replace one-hot feature / bool, default False
+            - direct_use_feature_value: whether to direct use feature values as the feature / bool, default False
+        '''
+
         self.dataset = pd.read_csv(dataset, index_col=0) if dataset.split('.')[1] == 'csv' else pd.read_excel(dataset, index_col=0)
         drop_columns = [c for c in self.dataset.columns if c not in features and c != 'atomic number']
         self.dataset = self.dataset.loc[self.dataset.index.isin(elements)]
