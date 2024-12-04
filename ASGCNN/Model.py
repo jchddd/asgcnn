@@ -18,63 +18,107 @@ class CGCNN(nn.Module):
                  att=False,
                  p_droput=0,
                  task_typ='regre',
-                 regre_dim=1,
-                 class_dim=[5, 4]):
+                 class_dim=[5, 4],
+                 regre_dim=[1],
+                 return_vp=False):
         super().__init__()
         # init
         self.name = 'CGCNN'
         self.task_typ = task_typ
-        # nn bulk
+        # embedding
         self.node_embedding = MLPLayer(node_feat_length, embed_feat_length, mlp_acti)
+        # convolution
         if conv_type == 'C':
             self.conv_layers = nn.ModuleList([ConvFunc_CGCNN(embed_feat_length, edge_feat_length) for _ in range(conv_number)])
         elif conv_type == 'Ce':
             self.conv_layers = nn.ModuleList([ConvFunc_CGCNN_edgeMLP(embed_feat_length, edge_feat_length) for _ in range(conv_number)])
+        # pooling
         self.aver_pool = AvgPooling()
-        # nn FCLs
-        fc_lens = [embed_feat_length] + fc_lens
-        self.fc_layers = nn.ModuleList([MLPLayer(fc_lens[_], fc_lens[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens) - 1)])
-        # nn attention
+        # self Attention
         self.att = att
-        self.fc_atten_mlp = MLPLayer(embed_feat_length, embed_feat_length, 'elu')
-        self.fc_atten_bn = nn.BatchNorm1d(embed_feat_length)
-        # nn target
+        self.self_att = nn.ModuleList([MLPLayer(embed_feat_length, 2 * embed_feat_length, mlp_acti), 
+                             MLPLayer(2 * embed_feat_length, embed_feat_length, 'softmax')])
+        # fully connect layers
+        if   type(fc_lens[0]) == int:
+            self.one_fcl = True
+            fc_lens = [embed_feat_length] + fc_lens
+            self.fc_layers = nn.ModuleList([MLPLayer(fc_lens[_], fc_lens[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens) - 1)])
+        elif type(fc_lens[0]) == list:
+            self.one_fcl = False
+            for fi, fc_lens_i in enumerate(fc_lens):
+                fc_lens[fi] = [embed_feat_length] + fc_lens_i
+        # predict target
         self.class_num = len(class_dim)
-        for i, dim_class in enumerate(class_dim):
-            setattr(self, 'pred_class_' + str(i), MLPLayer(fc_lens[-1], dim_class, 'softmax'))
-        self.pred_target = nn.Linear(fc_lens[-1], regre_dim)
-        # nn vector
-        self.return_vt = False
+        self.regre_num = len(regre_dim)
+        if   self.one_fcl:
+            if task_typ == 'multy':
+                for i, dim_class in enumerate(class_dim):
+                    setattr(self, 'pred_class_' + str(i), MLPLayer(fc_lens[-1], dim_class, 'softmax'))
+            for i, dim_regre in enumerate(regre_dim):
+                setattr(self, 'pred_regre_' + str(i), nn.Linear(fc_lens[-1], dim_regre))
+        elif not self.one_fcl:
+            if task_typ == 'multy':
+                for i, dim_class in enumerate(class_dim):
+                    fc_lens_i = fc_lens[i]
+                    if   len(fc_lens_i) == 1:
+                        setattr(self, 'pred_class_' + str(i), nn.ModuleList([MLPLayer(fc_lens_i[-1], dim_class, 'softmax')]))
+                    elif len(fc_lens_i)  > 1:
+                        setattr(self, 'pred_class_' + str(i), nn.ModuleList([MLPLayer(fc_lens_i[_], fc_lens_i[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens_i) - 1)] + [MLPLayer(fc_lens_i[-1], dim_class, 'softmax')]))
+            for i, dim_regre in enumerate(regre_dim):
+                fc_lens_i = fc_lens[i + len(class_dim)] if task_typ == 'multy' else fc_lens[i]
+                if  len(fc_lens_i) == 1:
+                    setattr(self, 'pred_regre_' + str(i), nn.ModuleList([nn.Linear(fc_lens_i[-1], dim_regre)]))
+                elif len(fc_lens_i)  > 1:
+                    setattr(self, 'pred_regre_' + str(i), nn.ModuleList([MLPLayer(fc_lens_i[_], fc_lens_i[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens_i) - 1)] + [nn.Linear(fc_lens_i[-1], dim_regre)]))
+        # return graph feature vector
+        self.return_vp = return_vp
 
     def forward(self, g):
         # init
         g = g.local_var()
         v = g.ndata.pop('h_v')
         e = g.edata.pop('h_e')
+        # embedding
         v = self.node_embedding(v)
         # convolution
         for con_layer in self.conv_layers:
             v = con_layer(g, v, e)
         # pooling
-        v_s = self.aver_pool(g, v)
+        vc = self.aver_pool(g, v)
+        vp = vc
+        # self attention 
         if self.att:
-            v_s = self.fc_atten_bn(self.fc_atten_mlp(v_s) * v_s)
-        # FCLs
-        for fc_layer in self.fc_layers:
-            v_s = fc_layer(v_s)
-        # target
-        if self.task_typ == 'regre':
-            target = self.pred_target(v_s)
-        elif self.task_typ == 'multy':
-            target_class = []
+            for at_layer in self.self_att:
+                vc = at_layer(vc)
+        # fully connect layers
+        if self.one_fcl:
+            for fc_layer in self.fc_layers:
+                vc = fc_layer(vc)
+        # predict target
+        targets = []
+        if self.task_typ == 'multy':
             for i in range(self.class_num):
-                target_class.append(getattr(self, 'pred_class_' + str(i))(v_s))
-            target = self.pred_target(v_s)
-            target = torch.cat(target_class + [target], dim=1)
-        if self.return_vt:
-            return target, v_s
+                if   self.one_fcl:
+                    targets.append(getattr(self, 'pred_class_' + str(i))(vc))
+                elif not self.one_fcl:
+                    target = vc
+                    for fcl in getattr(self, 'pred_class_' + str(i)):
+                        target = fcl(target)
+                    targets.append(target)
+        for i in range(self.regre_num):
+            if   self.one_fcl:
+                targets.append(getattr(self, 'pred_regre_' + str(i))(vc))
+            elif not self.one_fcl:
+                target = vc
+                for fcl in getattr(self, 'pred_regre_' + str(i)):
+                    target = fcl(target)
+                targets.append(target)
+        target = torch.cat(targets, dim=1)
+        # return graph feature vector
+        if self.return_vp:
+            return target, vp
         else:
-            return target
+            return target            
 
 
 class SGCNN(nn.Module):
@@ -91,171 +135,260 @@ class SGCNN(nn.Module):
                  att=False,
                  p_droput=0,
                  task_typ='regre',
-                 regre_dim=1,
-                 class_dim=[5, 4]):
+                 class_dim=[5, 4],
+                 regre_dim=[1],
+                 return_vp=False):
         super().__init__()
         # init
         self.name = 'SGCNN'
         self.task_typ = task_typ
-        # nn slab
+        # embedding
         self.node_embedding_slab = MLPLayer(node_feat_length_slab, embed_feat_length, mlp_acti)
+        self.node_embedding_bulk = MLPLayer(node_feat_length_bulk, embed_feat_length, mlp_acti)
+        # convolution
         if conv_type == 'C':
             self.conv_layers_slab = nn.ModuleList([ConvFunc_CGCNN(embed_feat_length, edge_feat_length_slab) for _ in range(conv_number)])
-        elif conv_type == 'Ce':
-            self.conv_layers_slab = nn.ModuleList([ConvFunc_CGCNN_edgeMLP(embed_feat_length, edge_feat_length_slab) for _ in range(conv_number)])
-        self.aver_pool_slab = AvgPooling()
-        # nn bulk
-        self.node_embedding_bulk = MLPLayer(node_feat_length_bulk, embed_feat_length, mlp_acti)
-        if conv_type == 'C':
             self.conv_layers_bulk = nn.ModuleList([ConvFunc_CGCNN(embed_feat_length, edge_feat_length_bulk) for _ in range(conv_number)])
         elif conv_type == 'Ce':
+            self.conv_layers_slab = nn.ModuleList([ConvFunc_CGCNN_edgeMLP(embed_feat_length, edge_feat_length_slab) for _ in range(conv_number)])
             self.conv_layers_slab = nn.ModuleList([ConvFunc_CGCNN_edgeMLP(embed_feat_length, edge_feat_length_bulk) for _ in range(conv_number)])
-        self.aver_pool_bulk = AvgPooling()
-        # nn FCLs
-        fc_lens = [embed_feat_length * 2] + fc_lens
-        self.fc_layers = nn.ModuleList([MLPLayer(fc_lens[_], fc_lens[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens) - 1)])
-        # nn attention
+        # pooling
+        self.pool_slab = AvgPooling()
+        self.pool_bulk = AvgPooling()
+        # self Attention
         self.att = att
-        self.fc_atten_mlp = MLPLayer(embed_feat_length * 2, embed_feat_length * 2, 'elu')
-        self.fc_atten_bn = nn.BatchNorm1d(embed_feat_length * 2)
-        # nn target
+        self.self_att = nn.ModuleList([MLPLayer(2 * embed_feat_length, 3 * embed_feat_length, mlp_acti), 
+                             MLPLayer(3 * embed_feat_length, 2 * embed_feat_length, 'softmax')])
+        # fully connect layers
+        if   type(fc_lens[0]) == int:
+            self.one_fcl = True
+            fc_lens = [2 * embed_feat_length] + fc_lens
+            self.fc_layers = nn.ModuleList([MLPLayer(fc_lens[_], fc_lens[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens) - 1)])
+        elif type(fc_lens[0]) == list:
+            self.one_fcl = False
+            for fi, fc_lens_i in enumerate(fc_lens):
+                fc_lens[fi] = [embed_feat_length] + fc_lens_i
+        # predict target
         self.class_num = len(class_dim)
-        for i, dim_class in enumerate(class_dim):
-            setattr(self, 'pred_class_' + str(i), MLPLayer(fc_lens[-1], dim_class, 'softmax'))
-        self.pred_target = nn.Linear(fc_lens[-1], regre_dim)
-        # nn vector
-        self.return_vt = False
+        self.regre_num = len(regre_dim)
+        if   self.one_fcl:
+            if task_typ == 'multy':
+                for i, dim_class in enumerate(class_dim):
+                    setattr(self, 'pred_class_' + str(i), MLPLayer(fc_lens[-1], dim_class, 'softmax'))
+            for i, dim_regre in enumerate(regre_dim):
+                setattr(self, 'pred_regre_' + str(i), nn.Linear(fc_lens[-1], dim_regre))
+        elif not self.one_fcl:
+            if task_typ == 'multy':
+                for i, dim_class in enumerate(class_dim):
+                    fc_lens_i = fc_lens[i]
+                    if   len(fc_lens_i) == 1:
+                        setattr(self, 'pred_class_' + str(i), nn.ModuleList([MLPLayer(fc_lens_i[-1], dim_class, 'softmax')]))
+                    elif len(fc_lens_i)  > 1:
+                        setattr(self, 'pred_class_' + str(i), nn.ModuleList([MLPLayer(fc_lens_i[_], fc_lens_i[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens_i) - 1)] + [MLPLayer(fc_lens_i[-1], dim_class, 'softmax')]))
+            for i, dim_regre in enumerate(regre_dim):
+                fc_lens_i = fc_lens[i + len(class_dim)] if task_typ == 'multy' else fc_lens[i]
+                if  len(fc_lens_i) == 1:
+                    setattr(self, 'pred_regre_' + str(i), nn.ModuleList([nn.Linear(fc_lens_i[-1], dim_regre)]))
+                elif len(fc_lens_i)  > 1:
+                    setattr(self, 'pred_regre_' + str(i), nn.ModuleList([MLPLayer(fc_lens_i[_], fc_lens_i[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens_i) - 1)] + [nn.Linear(fc_lens_i[-1], dim_regre)]))
+        # return graph feature vector
+        self.return_vp = return_vp
 
     def forward(self, gs, gb):
         # slab init
         gs = gs.local_var()
         vs = gs.ndata.pop('h_v')
         es = gs.edata.pop('h_e')
+        # slab embedding
         vs = self.node_embedding_slab(vs)
         # slab convolution
         for con_layer in self.conv_layers_slab:
             vs = con_layer(gs, vs, es)
         # slab pooling
-        vs_s = self.aver_pool_slab(gs, vs)
+        vsp = self.pool_slab(gs, vs)
         # bulk init
         gb = gb.local_var()
         vb = gb.ndata.pop('h_v')
         eb = gb.edata.pop('h_e')
+        # bulk embedding
         vb = self.node_embedding_bulk(vb)
         # bulk convolution
         for con_layer in self.conv_layers_bulk:
             vb = con_layer(gb, vb, eb)
         # bulk pooling
-        vb_s = self.aver_pool_bulk(gb, vb)
-        # FCLs
-        vt = torch.cat([vs_s, vb_s], dim=1)
+        vbp = self.pool_bulk(gb, vb)
+        # cat graph features
+        vt = torch.cat([vsp, vbp], dim=1)
+        vp = vt
+        # self attention 
         if self.att:
-            vt = self.fc_atten_bn(self.fc_atten_mlp(vt) * vt)
-        for fc_layer in self.fc_layers:
-            vt = fc_layer(vt)
-        # target
-        if self.task_typ == 'regre':
-            target = self.pred_target(vt)
-        elif self.task_typ == 'multy':
-            target_class = []
+            for at_layer in self.self_att:
+                vt = at_layer(vt)
+        # fully connect layers
+        if self.one_fcl:
+            for fc_layer in self.fc_layers:
+                vt = fc_layer(vt)
+        # predict target
+        targets = []
+        if self.task_typ == 'multy':
             for i in range(self.class_num):
-                target_class.append(getattr(self, 'pred_class_' + str(i))(vt))
-            target = self.pred_target(vt)
-            target = torch.cat(target_class + [target], dim=1)
-        if self.return_vt:
-            return target, vt
+                if   self.one_fcl:
+                    targets.append(getattr(self, 'pred_class_' + str(i))(vt))
+                elif not self.one_fcl:
+                    target = vt
+                    for fcl in getattr(self, 'pred_class_' + str(i)):
+                        target = fcl(target)
+                    targets.append(target)
+        for i in range(self.regre_num):
+            if   self.one_fcl:
+                targets.append(getattr(self, 'pred_regre_' + str(i))(vt))
+            elif not self.one_fcl:
+                target = vt
+                for fcl in getattr(self, 'pred_regre_' + str(i)):
+                    target = fcl(target)
+                targets.append(target)
+        target = torch.cat(targets, dim=1)
+        # return graph feature vector
+        if self.return_vp:
+            return target, vp
         else:
-            return target
+            return target            
 
 
 class ASGCNN(nn.Module):
     def __init__(self,
                  node_feat_length_adsb,
                  edge_feat_length_adsb,
-                 embedding_length_adsb,
+                 embed_feat_length_adsb,
                  node_feat_length_slab,
                  edge_feat_length_slab,
-                 embedding_length_slab,
+                 embed_feat_length_slab,
                  conv_number,
                  fc_lens,
                  mlp_acti='silu',
                  conv_type='Ce',
+                 att=False,
                  p_droput=0,
                  task_typ='regre',
-                 regre_dim=1,
-                 class_dim=[5, 4]):
+                 class_dim=[5, 4],
+                 regre_dim=[1],
+                 return_vp=False):
         super().__init__()
         # init
         self.name = 'ASGCNN'
         self.task_typ = task_typ
-        # nn adsb
-        self.node_embedding_adsb = MLPLayer(node_feat_length_adsb, embedding_length_adsb, mlp_acti)
+        # embedding
+        self.node_embedding_adsb = MLPLayer(node_feat_length_adsb, embed_feat_length_adsb, mlp_acti)
+        self.node_embedding_slab = MLPLayer(node_feat_length_slab, embed_feat_length_slab, mlp_acti)
+        # convolution
         if conv_type == 'C':
-            self.conv_layers_adsb = nn.ModuleList([ConvFunc_CGCNN(embedding_length_adsb, edge_feat_length_adsb) for _ in range(conv_number)])
+            self.conv_layers_adsb = nn.ModuleList([ConvFunc_CGCNN(embed_feat_length_adsb, edge_feat_length_adsb) for _ in range(conv_number)])
+            self.conv_layers_slab = nn.ModuleList([ConvFunc_CGCNN(embed_feat_length_slab, edge_feat_length_slab) for _ in range(conv_number)])
         elif conv_type == 'Ce':
-            self.conv_layers_adsb = nn.ModuleList([ConvFunc_CGCNN_edgeMLP(embedding_length_adsb, edge_feat_length_adsb) for _ in range(conv_number)])
-        self.aver_pool_adsb = AvgPooling()
-        # nn slab
-        self.node_embedding_slab = MLPLayer(node_feat_length_slab, embedding_length_slab, mlp_acti)
-        if conv_type == 'C':
-            self.conv_layers_slab = nn.ModuleList([ConvFunc_CGCNN(embedding_length_slab, edge_feat_length_slab) for _ in range(conv_number)])
-        elif conv_type == 'Ce':
-            self.conv_layers_slab = nn.ModuleList([ConvFunc_CGCNN_edgeMLP(embedding_length_slab, edge_feat_length_slab) for _ in range(conv_number)])
-        self.aver_pool_slab = AvgPooling()
-        # nn FCLs
-        fc_lens = [embedding_length_adsb + embedding_length_slab] + fc_lens
-        self.fc_layers = nn.ModuleList([MLPLayer(fc_lens[_], fc_lens[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens) - 1)])
-        # nn attention
-        self.fc_atten_mlp = MLPLayer(embedding_length_adsb + embedding_length_slab, embedding_length_adsb + embedding_length_slab, 'elu')
-        self.fc_atten_bn = nn.BatchNorm1d(embedding_length_adsb + embedding_length_slab)
-        # nn target
+            self.conv_layers_adsb = nn.ModuleList([ConvFunc_CGCNN_edgeMLP(embed_feat_length_adsb, edge_feat_length_adsb) for _ in range(conv_number)])
+            self.conv_layers_slab = nn.ModuleList([ConvFunc_CGCNN_edgeMLP(embed_feat_length_slab, edge_feat_length_slab) for _ in range(conv_number)])
+        # pooling
+        self.pool_adsb = AvgPooling()            
+        self.pool_slab = AvgPooling()
+        embed_feat_length = embed_feat_length_adsb + embed_feat_length_slab
+        # self Attention
+        self.att = att
+        self.self_att = nn.ModuleList([MLPLayer(2 * embed_feat_length, 3 * embed_feat_length, mlp_acti), 
+                             MLPLayer(3 * embed_feat_length, 2 * embed_feat_length, 'softmax')])
+        # fully connect layers
+        if   type(fc_lens[0]) == int:
+            self.one_fcl = True
+            fc_lens = [embed_feat_length] + fc_lens
+            self.fc_layers = nn.ModuleList([MLPLayer(fc_lens[_], fc_lens[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens) - 1)])
+        elif type(fc_lens[0]) == list:
+            self.one_fcl = False
+            for fi, fc_lens_i in enumerate(fc_lens):
+                fc_lens[fi] = [embed_feat_length] + fc_lens_i
+        # predict target
         self.class_num = len(class_dim)
-        for i, dim_class in enumerate(class_dim):
-            setattr(self, 'pred_class_' + str(i), MLPLayer(fc_lens[-1], dim_class, 'softmax'))
-        self.pred_target = nn.Linear(fc_lens[-1], regre_dim)
-        # nn vector
-        self.return_vt = False
+        self.regre_num = len(regre_dim)
+        if   self.one_fcl:
+            if task_typ == 'multy':
+                for i, dim_class in enumerate(class_dim):
+                    setattr(self, 'pred_class_' + str(i), MLPLayer(fc_lens[-1], dim_class, 'softmax'))
+            for i, dim_regre in enumerate(regre_dim):
+                setattr(self, 'pred_regre_' + str(i), nn.Linear(fc_lens[-1], dim_regre))
+        elif not self.one_fcl:
+            if task_typ == 'multy':
+                for i, dim_class in enumerate(class_dim):
+                    fc_lens_i = fc_lens[i]
+                    if   len(fc_lens_i) == 1:
+                        setattr(self, 'pred_class_' + str(i), nn.ModuleList([MLPLayer(fc_lens_i[-1], dim_class, 'softmax')]))
+                    elif len(fc_lens_i)  > 1:
+                        setattr(self, 'pred_class_' + str(i), nn.ModuleList([MLPLayer(fc_lens_i[_], fc_lens_i[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens_i) - 1)] + [MLPLayer(fc_lens_i[-1], dim_class, 'softmax')]))
+            for i, dim_regre in enumerate(regre_dim):
+                fc_lens_i = fc_lens[i + len(class_dim)] if task_typ == 'multy' else fc_lens[i]
+                if  len(fc_lens_i) == 1:
+                    setattr(self, 'pred_regre_' + str(i), nn.ModuleList([nn.Linear(fc_lens_i[-1], dim_regre)]))
+                elif len(fc_lens_i)  > 1:
+                    setattr(self, 'pred_regre_' + str(i), nn.ModuleList([MLPLayer(fc_lens_i[_], fc_lens_i[_ + 1], mlp_acti, p_droput) for _ in range(len(fc_lens_i) - 1)] + [nn.Linear(fc_lens_i[-1], dim_regre)]))
+        # return graph feature vector
+        self.return_vp = return_vp
 
     def forward(self, ga, gs):
         # adsb init
         ga = ga.local_var()
         va = ga.ndata.pop('h_v')
         ea = ga.edata.pop('h_e')
+        # adsb embedding
         va = self.node_embedding_adsb(va)
         # adsb convolution
         for conv_layer in self.conv_layers_adsb:
             va = conv_layer(ga, va, ea)
         # adsb pooling
-        va_s = self.aver_pool_adsb(ga, va)
+        vap = self.pool_adsb(ga, va)
         # slab init
         gs = gs.local_var()
         vs = gs.ndata.pop('h_v')
         es = gs.edata.pop('h_e')
+        # slab embedding
         vs = self.node_embedding_slab(vs)
         # slab convolution
         for conv_layer in self.conv_layers_slab:
             vs = conv_layer(gs, vs, es)
         # slab pooling
-        vs_s = self.aver_pool_slab(gs, vs)
-        # attention
-        vt = torch.cat([va_s, vs_s], dim=1)
-        vt = self.fc_atten_bn(self.fc_atten_mlp(vt) * vt)
-        # FCLs
-        for fc_layer in self.fc_layers:
-            vt = fc_layer(vt)
-        # target
-        if self.task_typ == 'regre':
-            target = self.pred_target(vt)
-        elif self.task_typ == 'multy':
-            target_class = []
+        vsp = self.pool_slab(gs, vs)
+        # cat graph features
+        vt = torch.cat([vap, vsp], dim=1)
+        vp = vt
+        # self attention 
+        if self.att:
+            for at_layer in self.self_att:
+                vt = at_layer(vt)
+        # fully connect layers
+        if self.one_fcl:
+            for fc_layer in self.fc_layers:
+                vt = fc_layer(vt)
+        # predict target
+        targets = []
+        if self.task_typ == 'multy':
             for i in range(self.class_num):
-                target_class.append(getattr(self, 'pred_class_' + str(i))(vt))
-            target = self.pred_target(vt)
-            target = torch.cat(target_class + [target], dim=1)
-        if self.return_vt:
-            return target, vt
+                if   self.one_fcl:
+                    targets.append(getattr(self, 'pred_class_' + str(i))(vt))
+                elif not self.one_fcl:
+                    target = vt
+                    for fcl in getattr(self, 'pred_class_' + str(i)):
+                        target = fcl(target)
+                    targets.append(target)
+        for i in range(self.regre_num):
+            if   self.one_fcl:
+                targets.append(getattr(self, 'pred_regre_' + str(i))(vt))
+            elif not self.one_fcl:
+                target = vt
+                for fcl in getattr(self, 'pred_regre_' + str(i)):
+                    target = fcl(target)
+                targets.append(target)
+        target = torch.cat(targets, dim=1)
+        # return graph feature vector
+        if self.return_vp:
+            return target, vp
         else:
-            return target
+            return target            
 
 
 class ASGCNN_pretrain(nn.Module):
