@@ -197,7 +197,7 @@ class Trainer():
                 # snapshot
                 if self.snapshot and self.last_epoch in self.snapshot_point:
                     self.Modules.append(copy.deepcopy(self.Module))
-                    self.Module.apply(weight_init)
+                    # self.Module.apply(weight_init)
                     Optimizer = self._load_optimizer(self.optimizer, self.init_lr, self.init_lr)
                     self.last_lr = self.init_lr
                     Scheduler = self._load_scheduler(self.scheduler, Optimizer, self.scheduler_para, -1)
