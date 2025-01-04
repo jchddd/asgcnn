@@ -100,6 +100,7 @@ class Trainer():
         self.snapshot = False
         self.snapshot_point = []
         self.Modules = []
+        self.to_normal_ensemble = False
         # target
         self.target_dims = target_dims
 
@@ -136,18 +137,22 @@ class Trainer():
         elif scheduler == 'step':
             return th.optim.lr_scheduler.StepLR(optimizer, step_size=step_para, gamma=0.1, last_epoch=last_epoch)
 
-    def init_snapshot_ensembling(self, cycle_time=5, epoch_each=200):
+    def init_snapshot_ensembling(self, cycle_time=5, epoch_each=200, weight_init=False):
         '''
         Initialize snapshot ensembling
 
         Parameters:
             - cycle_time: the number of cycles to collect the model / int, default 5
             - epoch_each: epoches for each cycle / int, default 200
+            - weight_init: after the model is acquired, initialize the weights, equivalent to an ordinary ensemble model / bool, default False
+
         '''
         self.snapshot = True
         self.snapshot_point = [(i + 1) * epoch_each - 1 for i in range(cycle_time)]
         self.scheduler = 'cos'
         self.scheduler_para = epoch_each
+        if weight_init:
+            self.to_normal_ensemble = True
 
     def train(self, epoch, disable_tqdm=False):
         '''
@@ -197,7 +202,8 @@ class Trainer():
                 # snapshot
                 if self.snapshot and self.last_epoch in self.snapshot_point:
                     self.Modules.append(copy.deepcopy(self.Module))
-                    # self.Module.apply(weight_init)
+                    if self.to_normal_ensemble:
+                        self.Module.apply(weight_init)
                     Optimizer = self._load_optimizer(self.optimizer, self.init_lr, self.init_lr)
                     self.last_lr = self.init_lr
                     Scheduler = self._load_scheduler(self.scheduler, Optimizer, self.scheduler_para, -1)
@@ -399,22 +405,31 @@ class Trainer():
         return cms, mcms
 
     def show_learn_curve(self):
-        plt.figure(figsize=(6, 4))
-        plt.xlabel('epoch', fontsize=16)
-        plt.ylabel('loss', fontsize=16)
+        plt.figure(figsize=(12, 6))
+        fontsize = 15
+        plt.title('Loss Curve', fontsize=fontsize)
+        plt.xlabel('Epoch', fontsize=fontsize)
+        plt.ylabel('Loss', fontsize=fontsize)
         plt.plot(range(len(self.losses_train)), self.losses_train, 'y', label='train', zorder=2)
         plt.plot(range(len(self.losses_valid)), self.losses_valid, 'b', label='valid', zorder=1)
+        plt.xticks(fontsize=fontsize - 3)
+        plt.yticks(fontsize=fontsize - 3)
         plt.legend()
         plt.show()
         
     def show_lr(self):
-        plt.figure(figsize=(6, 4))
-        plt.xlabel('epoch', fontsize=16)
-        plt.ylabel('learning rate', fontsize=16)
+        plt.figure(figsize=(12, 6))
+        fontsize = 15
+        plt.title(" Learning Rate Curve", fontsize=fontsize)
+        plt.xlabel('Epoch', fontsize=fontsize)
+        plt.ylabel('Learning Rate', fontsize=fontsize)
         plt.plot(self.lrs)
+        plt.xticks(fontsize=fontsize - 3)
+        plt.yticks(fontsize=fontsize - 3)
         plt.show()
 
     def show_result(self, ti=0, dataset='test'):
+        fontsize = 15
         if self.target_dims[ti] == 1:
             maxv = max(self.Dataloader_train.target[:, ti]).cpu().item()
             minv = min(self.Dataloader_train.target[:, ti]).cpu().item()
@@ -422,10 +437,13 @@ class Trainer():
             minv = minv - (maxv - minv) * 0.1
             # init figure
             plt.figure(figsize=(6, 6))
-            plt.xlabel('DFT', fontsize=16)
-            plt.ylabel('predict', fontsize=16)
+            plt.title('parity plot', fontsize=fontsize)
+            plt.xlabel('DFT', fontsize=fontsize)
+            plt.ylabel('predict', fontsize=fontsize)
             plt.plot([-10, 10], [-10, 10])
             plt.axis([minv, maxv, minv, maxv])
+            plt.xticks(fontsize=fontsize - 3)
+            plt.yticks(fontsize=fontsize - 3)
             # init
             print_name = ['train', 'valid', 'test']
             colors = ['y', 'b', 'r']
@@ -482,7 +500,7 @@ class Trainer():
             tpr["macro"] = mean_tpr
             roc_auc["macro"] = auc(fpr["macro"], tpr["macro"])
             # plot roc for each class
-            plt.figure()
+            plt.figure(figsize=(10, 6))
             lw = 2
             for i in range(n_classes):
                 plt.plot(fpr[i], tpr[i], lw=lw, label='ROC curve of class {0} (area = {1:0.2f})'.format(i, roc_auc[i]))
@@ -494,13 +512,15 @@ class Trainer():
             plt.plot([0, 1], [0, 1], 'k--', lw=lw)
             plt.xlim([0.0, 1.0])
             plt.ylim([0.0, 1.05])
-            plt.xlabel('False Positive Rate')
-            plt.ylabel('True Positive Rate')
-            plt.title('Multi-class ROC curve')
+            plt.xlabel('False Positive Rate', fontsize=fontsize)
+            plt.ylabel('True Positive Rate', fontsize=fontsize)
+            plt.title('Multi-class ROC curve', fontsize=fontsize)
+            plt.xticks(fontsize=fontsize - 3)
+            plt.yticks(fontsize=fontsize - 3)
             plt.legend(loc="lower right")
             plt.show()
     
-    def show_uq(self, ti=0, i_s=0, i_e=10, dataset='test'):
+    def show_uq(self, tir=0, i_s=0, i_e=10, dataset='test'):
         if dataset == 'test':
             dataloader = self.Dataloader_test
         elif dataset == 'valid':
@@ -508,18 +528,26 @@ class Trainer():
         elif dataset == 'train':
             dataloader = self.Dataloader_train
         
+        ct = 0
+        for td in self.target_dims:
+            if td > 1:
+                ct += 1
+        
         yp, uq = self.predict(dataloader, True, True)
-        true_values = dataloader.target[:, ti].cpu()[i_s: i_e]
-        predicted_values = yp[:, ti][i_s: i_e]
-        uncertainty = uq[:, ti][i_s: i_e]
+        true_values = dataloader.target[:, tir + ct].cpu()[i_s: i_e]
+        predicted_values = yp[:, tir + ct][i_s: i_e]
+        uncertainty = uq[:, tir][i_s: i_e]
 
-        fig, ax = plt.subplots()
+        fontsize = 15
+        fig, ax = plt.subplots(figsize=(8, 6))
+        plt.xticks(fontsize=fontsize - 3)
+        plt.yticks(fontsize=fontsize - 3)
         ax.scatter(true_values, predicted_values, color='blue', label='Predictions')
         ax.errorbar(true_values, predicted_values, xerr=uncertainty, yerr=uncertainty, fmt='o', color='red', ecolor='lightgray', capsize=5, label='Uncertainty')
         ax.plot([min(true_values), max(true_values)], [min(true_values), max(true_values)], '--k', label='Perfect prediction')
-        ax.set_title('Predictions vs True Values with Uncertainty')
-        ax.set_xlabel('True Values')
-        ax.set_ylabel('Predicted Values')
+        ax.set_title('Predictions vs True Values with Uncertainty', fontsize=fontsize)
+        ax.set_xlabel('True Values', fontsize=fontsize)
+        ax.set_ylabel('Predicted Values', fontsize=fontsize)
         ax.legend()
         plt.show()
 
@@ -602,6 +630,100 @@ class HybLoss(th.nn.Module):
             else:
                 loss_total += loss * self.weight[ti]
         return loss_total
+
+
+def node_feature_forward_selection(model, trainer, element_encoder, train_epoch=100, target_metric=[['valid', 'mae_0']], max_run=10):
+    """
+    Forward selection
+
+    Parameters:
+        - model: the Module class
+        - trainer: a Trainer with model and train and validation dataloader.
+          Feature search after global features are added is not supported by now.
+        - element_encoder: an Element_Encoder with all candidate features. 
+          For ASGCNN, both types of graphs must use the same node features
+        - train_epoch: training epoch / int, default 100
+        - target_metric: metric as the selection criterions. / (n, 2) list, default [['valid', 'mae_0']]
+          You can choose multiple metrics and use their sum as a criterion. Fill in the keys from the dictionary obtained by t.calculate_static()
+          At present, this only supports judging by the minimum value. The better the model, the lower the value of the metric show be
+        - max_run: maximum number of features to select / int, default 10
+    Returns:
+        - best features and scores
+    """
+    setup_seed(1234)
+    all_features = element_encoder.features
+    max_run = max_run if len(all_features) >= max_run else len(all_features)
+    best_features = []
+    best_scores = [np.inf] # np.NINF
+    trainer.snapshot = False
+    model_para = trainer.Module.model_args
+    # loop to max_run 
+    for i in range(max_run):
+        # record feature and score for each loop
+        check_features = []
+        check_scores = []
+        # forward select features 
+        for feat in all_features:
+            if feat not in best_features:
+                setup_seed(1234)
+                # reset element encoder
+                element_encoder.features = best_features + [feat]
+                element_encoder.assess_feature_properities()
+                element_encoder.encode_element()
+                # reset dataloader
+                trainer.Dataloader_train.init_predict()
+                trainer.Dataloader_train.init_train()
+                trainer.Dataloader_valid.init_predict()
+                trainer.Dataloader_valid.init_train()
+                # reset trainer
+                if   trainer.Module.name == 'CGCNN':
+                    model_para.update({'node_feat_length': element_encoder.feature_lentgh_total})
+                    trainer.Module=model(**model_para).to(trainer.device)
+                    trainer.Dataloader_train.apply_feature([element_encoder], [None], disable_tqdm=True)
+                    trainer.Dataloader_valid.apply_feature([element_encoder], [None], disable_tqdm=True)
+                elif trainer.Module.name == 'ASGCNN':
+                    model_para.update({'node_feat_length_adsb': element_encoder.feature_lentgh_total,
+                                       'node_feat_length_slab': element_encoder.feature_lentgh_total})
+                    trainer.Module=model(**model_para).to(trainer.device)
+                    trainer.Dataloader_train.apply_feature([element_encoder, element_encoder], [None, None], disable_tqdm=True)
+                    trainer.Dataloader_valid.apply_feature([element_encoder, element_encoder], [None, None], disable_tqdm=True)
+                trainer.last_epoch = -1
+                trainer.last_lr = trainer.init_lr
+                # train
+                trainer.train(train_epoch, disable_tqdm=True)
+                static = trainer.calculate_static()
+                # add check info
+                check_features.append(feat)
+                check_scores.append(sum([static[t[0]][t[1]] for t in target_metric]))
+        # add best feature
+        best_score = min(check_scores)
+        best_scores.append(best_score)
+        best_features.append(check_features[check_scores.index(best_score)])
+        if   best_score <= best_scores[-2]:
+            continue
+        else:
+            break
+
+    return best_features, best_scores[1:]
+
+
+def show_forawrd_selection(features, scores):
+    plt.figure(figsize=(12,6))
+    number_of_features = np.array(list(range(len(features)))) + 1
+    plt.plot(number_of_features, scores, marker='o', color='grey', markersize=12, markeredgecolor='k', markerfacecolor='w', ls='--', zorder=0)
+
+    y_text = max(scores) - (max(scores) - min(scores)) * 0.1
+    for i in number_of_features:
+        feature_text = '\n\n'.join([f for f in features[0: i]])
+        plt.text(i + 0.1, y_text, feature_text, va='top', zorder=6)
+    fontsize=15
+    plt.xlim(0.8, max(number_of_features) + 0.8)
+    plt.xticks(number_of_features, fontsize=fontsize - 3)
+    plt.yticks(fontsize=fontsize - 3)
+    plt.title('Feature Selection Process', fontsize=fontsize)
+    plt.xlabel('Number of Features', fontsize=fontsize)
+    plt.ylabel('Scores', fontsize=fontsize)
+
 
 #not_freeze_dict=['pred_adsb.layer.0.weight','pred_adsb.layer.0.bias','pred_adsb.layer.1.weight','pred_adsb.layer.1.bias',
 #                 'pred_site.layer.0.weight','pred_site.layer.0.bias','pred_site.layer.1.weight','pred_site.layer.1.bias',]
