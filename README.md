@@ -29,10 +29,12 @@ In parentheses is a version that is compatible after testing, current potential 
 - **pretrained**: Pretrained models. There are five models learned in an ensemble method, and they predict together to provide the uncertainty of the prediction results.
 - **structures**: VASP structure files for calculation and graph structure generation.
 # Tutorials
-- Query data: Query Heusler alloy data from OQMD: [Tutorials_query_data.ipynb](https://github.com/jchddd/asgcnn/blob/main/Tutorials_query_data.ipynb)
-- Batch construction of adsorption models and analysis of VASP results: [Jworkflow scripts](https://github.com/jchddd/scripts/tree/main/jworkflow)
-- View graph data characteristics and load pre-trained models: [Tutorials_load_pre-trained.ipynb](https://github.com/jchddd/asgcnn/blob/main/Tutorials_load_pre-trained.ipynb)
-- Create graph dataset and train new model from scratch: [Tutorials_model_training.ipynb](https://github.com/jchddd/asgcnn/blob/main/Tutorials_model_training.ipynb)
+- Query Heusler alloy data from OQMD: [Tutorial 1 - query data](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%201%20-%20query%20data.ipynb)
+- Analysis of VASP results and Batch construction of adsorption structures: [Jworkflow scripts](https://github.com/jchddd/scripts/tree/main/jworkflow)
+- Load pre-trained models and view graph data characteristics : [Tutorial 2 -_load_pre-trained model](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%202%20-%20load%20pre-trained%20model.ipynb)
+- Load datasets and train an ASGCNN from scratch: [Tutorial 3 - model training](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%203%20-%20model%20training.ipynb)
+- Other supported model architectures: [Tutorial 4 - Other model architecture](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%204%20-%20other%20model%20architecture.ipynb)
+- Hyperparameter search, integrated model and other training methods: [Turorial 5 - training method](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%205%20-%20training%20method.ipynb)
 # Citation
 If you are interested in our work, you can read our literature, and cite us using
 ```
