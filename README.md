@@ -30,7 +30,7 @@ In parentheses is a version that is compatible after testing, current potential 
 - **structures**: VASP structure files for calculation and graph structure generation.
 # Tutorials
 - Query Heusler alloy data from OQMD: [Tutorial 1 - query data](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%201%20-%20query%20data.ipynb)
-- Analysis of VASP results and Batch construction of adsorption structures: [Tutorial - data_process](https://github.com/jchddd/scripts/blob/main/jworkflow/Tutorial-data_process.ipynb), [Tutorial - slab](https://github.com/jchddd/scripts/blob/main/jworkflow/Tutorial-slab.ipynb)
+- Batch construction of adsorption structures and analysis of VASP results : [Tutorial - slab](https://github.com/jchddd/scripts/blob/main/jworkflow/Tutorial-slab.ipynb), [Tutorial - data_process](https://github.com/jchddd/scripts/blob/main/jworkflow/Tutorial-data_process.ipynb), [Tutorial - reaction](https://github.com/jchddd/scripts/blob/main/jworkflow/Tutorial-reaction.ipynb)
 - Load pre-trained models and view graph data characteristics : [Tutorial 2 -_load_pre-trained model](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%202%20-%20load%20pre-trained%20model.ipynb)
 - Load datasets and train an ASGCNN from scratch: [Tutorial 3 - model training](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%203%20-%20model%20training.ipynb)
 - Other supported model architectures: [Tutorial 4 - Other model architecture](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%204%20-%20other%20model%20architecture.ipynb)
