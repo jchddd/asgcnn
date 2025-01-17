@@ -34,7 +34,7 @@ In parentheses is a version that is compatible after testing, current potential 
 - Load pre-trained models and view graph data characteristics : [Tutorial 2 -_load_pre-trained model](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%202%20-%20load%20pre-trained%20model.ipynb)
 - Load datasets and train an ASGCNN from scratch: [Tutorial 3 - model training](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%203%20-%20model%20training.ipynb)
 - Other supported model architectures: [Tutorial 4 - Other model architecture](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%204%20-%20other%20model%20architecture.ipynb)
-- Hyperparameter search, integrated model and other training methods: [Turorial 5 - training method](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%205%20-%20training%20method.ipynb)
+- Hyperparameter search, ensemble model and other training methods: [Turorial 5 - training method](https://github.com/jchddd/asgcnn/blob/main/tutorials/Tutorial%205%20-%20training%20method.ipynb)
 # Citation
 If you are interested in our work, you can read our literature, and cite us using
 ```
