@@ -712,7 +712,7 @@ class Edge_Gate_Convolution(nn.Module):
         self.edge_update_linear_src  = nn.Linear(feat_length, feat_length)
         self.edge_update_linear_dst  = nn.Linear(feat_length, feat_length)
         self.edge_update_linear_edge = nn.Linear(feat_length, feat_length)
-        self.edge_update_acti        = get_activation(mlp_act)
+        self.edge_update_acti        = get_activation('sigmoid')
         self.edge_update_batchnorm   = nn.BatchNorm1d(feat_length)
         self.edge_acti               = get_activation(mlp_act)
 
@@ -732,7 +732,7 @@ class Edge_Gate_Convolution(nn.Module):
         # update node
         g.edata['e_update_sigmoid_gate'] = self.edge_update_acti(edge_feats_update)
         g.ndata['n_dst'] = self.node_update_linear_dst(node_feats)
-        g.update_all(fn.v_mul_e('n_dst', 'e_update_sigmoid_gate', 'f'), fn.sum('f', 'n_gate_1'))
+        g.update_all(fn.u_mul_e('n_dst', 'e_update_sigmoid_gate', 'f'), fn.sum('f', 'n_gate_1'))
         g.update_all(fn.copy_e("e_update_sigmoid_gate", "f"), fn.sum("f", "n_gate_2"))
         g.ndata["n_gate"] = g.ndata["n_gate_1"] / (g.ndata["n_gate_2"] + 1e-6)
         node_feats_update = self.node_update_linear_src(node_feats) + g.ndata.pop("n_gate")
@@ -770,7 +770,7 @@ class Edge_Attn_Convolution(nn.Module):
         g.edata['attn'] = edge_softmax(g, edge_feats_update.sum(dim=-1))
         self.attn_weight = g.edata['attn']
         g.ndata['n_dst'] = self.node_update_linear_dst(node_feats)
-        g.update_all(fn.v_mul_e("n_dst", "attn", "f"), fn.sum("f", "na_dst"))
+        g.update_all(fn.u_mul_e("n_dst", "attn", "f"), fn.sum("f", "na_dst"))
         node_feats_update = self.node_update_linear_src(node_feats) + g.ndata.pop("na_dst")
         # batch normal and residual
         edge_feats_update = self.edge_acti(self.edge_update_batchnorm(edge_feats_update)) + edge_feats
