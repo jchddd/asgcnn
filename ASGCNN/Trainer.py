@@ -11,6 +11,11 @@ from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_sc
 from sklearn.preprocessing import label_binarize
 from sklearn.multiclass import OneVsRestClassifier
 import warnings
+from ASGCNN.Encoder import Graph_data_loader
+from ASGCNN.Model import ASGCNN, CGCNN
+import hyperopt
+from hyperopt import hp, fmin, tpe, Trials, partial
+from hyperopt.early_stop import no_progress_loss
 
 warnings.filterwarnings('ignore')
 
@@ -127,7 +132,7 @@ class Trainer():
             elif isinstance(m, nn.BatchNorm1d):
                 group_no_decay.extend([*m.parameters()])
 
-        assert len(list(self.Module.parameters())) == len(group_decay) + len(group_no_decay)
+        # assert len(list(self.Module.parameters())) == len(group_decay) + len(group_no_decay)
         groups = [dict(params=group_decay, initial_lr=init_lr), dict(params=group_no_decay, initial_lr=init_lr, weight_decay=.0)]
         return groups
 
@@ -258,6 +263,39 @@ class Trainer():
             th.save(self.Module.state_dict(), path_dict)
             th.save(self.Module, path_model)
 
+    def get_graph_vector(self, Dataloader):
+        '''
+        Function to extract graph pool vectors (structure represented feature) from a Dataloader
+
+        Parameter:
+            - Dataloader: data loader that is used to perform prediction
+        '''
+        graph_vectors = []
+        if not self.snapshot:
+            Dataloader.init_predict()
+            self.Module.return_vp = True
+            self.Module.eval()
+            with th.no_grad():
+                for x, y in Dataloader:
+                    _, graph_vector = self._module_forward(x, self.Module)
+                    graph_vectors.append(graph_vector)
+            graph_vectors = th.cat(graph_vectors, dim=0)
+            self.Module.return_vp = False
+        elif self.snapshot:
+            for i, model in enumerate(slef.Modules):
+                graph_vectors.append([])
+                Dataloader.init_predict()
+                model.return_vp = True
+                model.eval()
+                with th.no_grad():
+                    for x, y in Dataloader:
+                        _, graph_vector = self._module_forward(x, model)
+                        graph_vectors[i].append(graph_vector)
+                graph_vectors[i] = th.cat(graph_vectors[i], dim=0)
+                model.return_vp = False
+        return graph_vectors
+                
+            
     def predict(self, Dataloader, to_class=False, return_uq=False):
         '''
         Function to use trained model to predict target from a Dataloader
@@ -725,18 +763,348 @@ def show_forawrd_selection(features, scores):
     plt.ylabel('Scores', fontsize=fontsize)
 
 
-#not_freeze_dict=['pred_adsb.layer.0.weight','pred_adsb.layer.0.bias','pred_adsb.layer.1.weight','pred_adsb.layer.1.bias',
+def optimize_hyperparameters(
+    model_type='CGCNN',
+    train_data_excel='',
+    train_bins=[],
+    valid_data_excel='',
+    valid_bins=[],
+    target_columns=[],
+    para_load_train_data={},
+    para_load_valid_data={},
+    class_dim=[],
+    regre_dim=[],
+    task_type='regre',
+    target_dims=[],
+    random_seed=666,
+    minmum_metric=['valid', 'mae_2'],
+    train_epoch=20,
+    max_evals=100,
+    early_stop_iter=100,
+    use_line_graph=False,
+    global_feat_train=None,
+    global_feat_valid=None,
+    global_feat_dim=0,
+    have_cluster=False
+):
+    '''
+    Function used to perform hyperparameter optimization. 
+    The hyperparameters are defined in advance and you only need to be passed in datasets and model related parameters
+
+    Parameters:
+        - model_type: type of the model / str, 'CGCNN' or 'ASGCNN', default = 'CGCNN'
+        - train_data_excel: data excel or csv file for training set data / path, default = ''
+        - train_bins: graph bins for training dataset / list, default = []
+        - valid_data_excel: data excel or csv file for validation set data / path, default = ''
+        - valid_bins: graph bins for validation dataset / list, default = []
+        - target_columns: target value column names / list, default = []
+        - para_load_train_data: other key and value pairs for parameters used to load training dataset except data_excel, encoders and target / dict, default = {}
+        - para_load_valid_data: other key and value pairs for parameters used to load training dataset except data_excel, encoders and target / dict, default = {}
+        - class_dim: class_dim for model setting / list, default = []
+        - regre_dim: regre_dim for model setting / list, default = []
+        - task_type: task_type for model setting / str, default = 'regre'
+        - target_dim: target_dim for Trainer setting / list, default = []
+        - random_seed: the random seed / int, default = 666
+        - minmum_metric: metric used to minmum the objective function, give two keys to get value from t.calculate_static() / list, default = ['valid', 'mae_0']
+        - train_epoch: training epoch at each evaluation / int, default = 20
+        - max_evals: max evaluation times / int, default = 100
+        - early_stop_iter: This parameter determines how many times the search stops without a drop in score / int, default = 100
+        - use_line_graph: whether line graph is stored on the dataset / bool, default = False
+        - train_global_feat: global feature for training set / np.array, default = None
+          this will add global feature to pool layer. If you wang to add them to node or edge, do it during dataset construction.
+        - valid_global_feat: global feature for validation set / np.array, default = None
+        - global_feat_dim: global feature dimension / int, default = 0 
+        - have_cluster: whether node cluster feature have been add to graph / bool, default = False
+    '''
+
+    def load_data():
+        Loader_train = Graph_data_loader()
+        Loader_train.load_data(
+            data_excel=train_data_excel,
+            target=target_columns,
+            encoders=train_bins,
+            **para_load_train_data
+        )
+
+        Loader_valid = Graph_data_loader()
+        Loader_valid.load_data(
+            data_excel=valid_data_excel,
+            target=target_columns,
+            encoders=valid_bins,
+            **para_load_valid_data
+        )
+
+        return Loader_train, Loader_valid
+
+    if global_feat_train is not None:
+        main_conv_typ = ['CGConv', 'EGate', 'EAtt', 'MGConv']
+    else:
+        main_conv_typ = ['CGConv', 'EGate', 'EAtt']
+    if have_cluster:
+        pool_type = ['avg', 'sum', 'cluster']
+    elif not have_cluster:
+        pool_type = ['avg', 'sum']
+    # general search parameters
+    if model_type == 'CGCNN':
+        search_params = {
+            'embed_feat_length': hp.quniform('embed_feat_length', 16, 124, 4),
+            'conv_num': hp.choice('conv_num', [1, 2, 3, 4, 5, 6]),
+            'conv_typ': hp.choice('conv_typ', main_conv_typ),
+            'pool_typ': hp.choice('pool_typ', pool_type),
+            'att': hp.choice('att', [True, False]),
+            'fcl_dim': hp.quniform('fcl_dim', 16, 124, 4),
+            'fcl_dep': hp.choice('fcl_dep', [1, 2, 3, 4, 5, 6]),
+            'mlp_acti': hp.choice('mlp_acti', ['elu', 'relu', 'prelu', 'selu', 'silu', 'celu', 'leakyrelu', 'sigmoid', 'logsigmoid', 'tanh', 'tanhshrink', 'softshrink']),
+            'p_droput': hp.uniform('p_droput', 0., 0.3),
+            'batch_size': hp.quniform('batch_size', 64, 512, 64),
+            'lr': hp.choice('lr', [1, 2, 3, 4, 5, 6]),
+            'weight_decay': hp.choice('weight_decay', [6, 7, 8, 9, 10, 11, 12]),
+            'optimizer': hp.choice('optimizer', ['SGD', 'Momentum', 'RMSprop', 'Adam', 'AdamW'])
+        }
+    elif model_type == 'ASGCNN':
+        search_params = {
+            'embed_feat_length_adsb': hp.quniform('embed_feat_length_adsb', 16, 124, 4),
+            'conv_num_adsb': hp.choice('conv_num_adsb', [1, 2, 3, 4, 5, 6]),
+            'conv_typ_adsb': hp.choice('conv_typ_adsb', ['CGConv', 'EGate', 'EAtt']),
+            'pool_typ_adsb': hp.choice('pool_typ_adsb', pool_type),
+            'embed_feat_length_slab': hp.quniform('embed_feat_length_slab', 16, 124, 4),
+            'conv_num_slab': hp.choice('conv_num_slab', [1, 2, 3, 4, 5, 6]),
+            'conv_typ_slab': hp.choice('conv_typ_slab', main_conv_typ),
+            'pool_typ_slab': hp.choice('pool_typ_slab', pool_type),
+            'att': hp.choice('att', [True, False]),
+            'fcl_dim': hp.quniform('fcl_dim', 16, 124, 4),
+            'fcl_dep': hp.choice('fcl_dep', [1, 2, 3, 4, 5, 6]),
+            'mlp_acti': hp.choice('mlp_acti', ['elu', 'relu', 'prelu', 'selu', 'silu', 'celu', 'leakyrelu', 'sigmoid', 'logsigmoid', 'tanh', 'tanhshrink', 'softshrink']),
+            'p_droput': hp.uniform('p_droput', 0., 0.3),
+            'batch_size': hp.quniform('batch_size', 64, 512, 64),
+            'lr': hp.choice('lr', [1, 2, 3, 4, 5, 6]),
+            'weight_decay': hp.choice('weight_decay', [6, 7, 8, 9, 10, 11, 12]),
+            'optimizer': hp.choice('optimizer', ['SGD', 'Momentum', 'RMSprop', 'Adam', 'AdamW'])
+        }
+    # mul target related hypermaters
+    search_params['mul_fcl'] = hp.choice('mul_fcl', [True, False])
+    if   task_type == 'regre':
+        num_targets = len(regre_dim)
+    elif task_type == 'multy':
+        num_targets = len(regre_dim) + len(class_dim)
+    for i in range(num_targets):
+        search_params['fcl_dim_' + str(i)] = hp.quniform('fcl_dim_' + str(i), 16, 124, 4)
+        search_params['fcl_dep_' + str(i)] = hp.choice('fcl_dep_' + str(i), [1, 2, 3, 4, 5, 6])
+    # line graph related hypermaters
+    if   use_line_graph and model_type == 'CGCNN':
+        search_params['conv_num_lg'] = hp.choice('conv_num_lg', [1, 2, 3, 4, 5, 6])
+        search_params['conv_typ_lg'] = hp.choice('conv_typ_lg', ['CGConv', 'EGate', 'EAtt'])
+    elif use_line_graph and model_type == 'ASGCNN':
+        search_params['conv_num_adsb_lg'] = hp.choice('conv_num_adsb_lg', [1, 2, 3, 4, 5, 6])
+        search_params['conv_typ_adsb_lg'] = hp.choice('conv_typ_adsb_lg', ['CGConv', 'EGate', 'EAtt'])
+        search_params['conv_num_slab_lg'] = hp.choice('conv_num_slab_lg', [1, 2, 3, 4, 5, 6])
+        search_params['conv_typ_slab_lg'] = hp.choice('conv_typ_slab_lg', ['CGConv', 'EGate', 'EAtt'])
+
+    def objective_function(params):
+        setup_seed(random_seed)
+        Loader_train, Loader_valid = load_data()
+        if global_feat_train is not None:
+            Loader_train.add_global_feat(global_feat_train)
+            Loader_valid.add_global_feat(global_feat_valid)
+            use_global_feat = True
+        else:
+            use_global_feat = False
+        Loader_train.batch_size = int(params['batch_size'])
+        Loader_valid.batch_size = int(params['batch_size'])
+        
+        if model_type == 'CGCNN':
+            node_feat_length = Loader_train.graphs[0][0].ndata['h_v'].shape[1]
+            edge_feat_length = Loader_train.graphs[0][0].edata['h_e'].shape[1]
+            angle_feat_length = Loader_train.line_graphs[0][0].edata['h_le'].shape[1] if use_line_graph else 0
+            # fully connect layers
+            if params['mul_fcl']:
+                fcl_dims = []
+                for i in range(num_targets):
+                    fcl_dims.append([int(params['fcl_dim_' + str(i)])] * int(params['fcl_dep_' + str(i)]))
+            elif not params['mul_fcl']: 
+                fcl_dims = [int(params['fcl_dim'])] * int(params['fcl_dep'])
+            # convolutional layers
+            if not use_line_graph:
+                conv_num = int(params['conv_num'])
+                conv_typ = params['conv_typ']
+            elif use_line_graph:
+                conv_num = [int(params['conv_num_lg']), int(params['conv_num'])]
+                conv_typ = [params['conv_typ_lg'], params['conv_typ']]
+            # model
+            model = CGCNN(
+                node_feat_length=node_feat_length,
+                edge_feat_length=edge_feat_length,
+                angle_feat_length=angle_feat_length,
+                embed_feat_length=int(params['embed_feat_length']),
+                conv_num=conv_num,
+                conv_typ=conv_typ,
+                pool_typ=params['pool_typ'],
+                att=params['att'],
+                fcl_dims=fcl_dims,
+                mlp_acti=params['mlp_acti'],
+                p_droput=params['p_droput'],
+                task_typ=task_type,
+                class_dim=class_dim,
+                regre_dim=regre_dim,
+                use_global_feat=use_global_feat,
+                global_feat_place='pool',
+                global_feat_dim=global_feat_dim
+            )
+        elif model_type == 'ASGCNN':
+            node_feat_length_adsb = Loader_train.graphs[0][0].ndata['h_v'].shape[1]
+            edge_feat_length_adsb = Loader_train.graphs[0][0].edata['h_e'].shape[1]
+            angle_feat_length_adsb = Loader_train.line_graphs[0][0].edata['h_le'].shape[1] if use_line_graph else 0
+            node_feat_length_slab = Loader_train.graphs[1][0].ndata['h_v'].shape[1]
+            edge_feat_length_slab = Loader_train.graphs[1][0].edata['h_e'].shape[1]
+            angle_feat_length_slab = Loader_train.line_graphs[1][0].edata['h_le'].shape[1] if use_line_graph else 0
+            # fully connect layers
+            if params['mul_fcl']:
+                fcl_dims = []
+                for i in range(num_targets):
+                    fcl_dims.append([int(params['fcl_dim_' + str(i)])] * int(params['fcl_dep_' + str(i)]))
+            elif not params['mul_fcl']: 
+                fcl_dims = [int(params['fcl_dim'])] * int(params['fcl_dep'])
+            # convolutional layers
+            if not use_line_graph:
+                conv_num_adsb = int(params['conv_num_adsb'])
+                conv_typ_adsb = params['conv_typ_adsb']
+                conv_num_slab = int(params['conv_num_slab'])
+                conv_typ_slab = params['conv_typ_slab']
+            elif use_line_graph:
+                conv_num_adsb = [int(params['conv_num_adsb_lg']), int(params['conv_num_adsb'])]
+                conv_typ_adsb = [params['conv_typ_adsb_lg'], params['conv_typ_adsb']]
+                conv_num_slab = [int(params['conv_num_slab_lg']), int(params['conv_num_slab'])]
+                conv_typ_slab = [params['conv_typ_slab_lg'], params['conv_typ_slab']]
+            # model            
+            model = ASGCNN(
+                node_feat_length_adsb=node_feat_length_adsb,
+                edge_feat_length_adsb=edge_feat_length_adsb,
+                angle_feat_length_adsb=angle_feat_length_adsb,
+                node_feat_length_slab=node_feat_length_slab,
+                edge_feat_length_slab=edge_feat_length_slab,
+                angle_feat_length_slab=angle_feat_length_slab,
+                embed_feat_length_adsb=int(params['embed_feat_length_adsb']),
+                conv_num_adsb=conv_num_adsb,
+                conv_typ_adsb=conv_typ_adsb,
+                pool_typ_adsb=params['pool_typ_adsb'],
+                embed_feat_length_slab=int(params['embed_feat_length_slab']),
+                conv_num_slab=conv_num_slab,
+                conv_typ_slab=conv_typ_slab,
+                pool_typ_slab=params['pool_typ_slab'],
+                att=params['att'],
+                fcl_dims=fcl_dims,
+                mlp_acti=params['mlp_acti'],
+                p_droput=params['p_droput'],
+                task_typ=task_type,
+                class_dim=class_dim,
+                regre_dim=regre_dim,
+                use_global_feat=use_global_feat,
+                global_feat_place='pool',
+                global_feat_dim=global_feat_dim
+            )
+
+        if task_type == 'regre':
+            metric = 'mae'
+        elif task_type == 'multy':
+            metric = 'hyb'
+        t = Trainer(
+            Module=model,
+            Dataloader_train=Loader_train,
+            Dataloader_valid=Loader_valid,
+            init_lr=0.1**int(params['lr']),
+            optimizer=params['optimizer'],
+            weight_decay=0.1**int(params['weight_decay']),
+            scheduler='step',
+            target_dims=target_dims,
+            metric=metric
+        )
+        t.train(train_epoch, disable_tqdm=True)
+        
+        return t.calculate_static()[minmum_metric[0]][minmum_metric[1]]
+
+    trials=Trials()
+    early_stop=no_progress_loss(early_stop_iter)
+    params_best= fmin(objective_function,
+                   space=search_params,
+                   algo=tpe.suggest,
+                   max_evals=max_evals,
+                   verbose=True,
+                   trials=trials,
+                   early_stop_fn=early_stop)
+
+    # parame translate
+    params_best['att'] = {0: False, 1: True}[params_best['att']]
+    params_best['batch_size'] = int(params_best['batch_size'])
+    params_best['embed_feat_length_adsb'] = int(params_best['embed_feat_length_adsb'])
+    params_best['embed_feat_length_slab'] = int(params_best['embed_feat_length_slab'])
+    params_best['lr'] = '1E-' + str(int(params_best['lr']))
+    params_best['mul_fcl'] = {0: False, 1: True}[params_best['mul_fcl']]
+    dic_mlp_act = {
+        0: 'elu',
+        1: 'relu',
+        2: 'prely',
+        3: 'selu',
+        4: 'silu',
+        5: 'celu',
+        6: 'leakyrelu',
+        7: 'sigmoid',
+        8: 'logsigmoid',
+        9: 'tanh',
+        10: 'tanhshrink',
+        11: 'softshrink'
+    }
+    params_best['mlp_acti'] = dic_mlp_act[params_best['mlp_acti']]
+    dic_opt = {
+        0: 'SGD',
+        1: 'Momentum',
+        2: 'RMSprop',
+        3: 'Adam',
+        4: 'AdamW'
+    }
+    params_best['optimizer'] = dic_opt[params_best['optimizer']]
+    params_best['weight_decay'] = '1E-' + str(int(params_best['weight_decay']))
+    dic_conv_typ = {
+        0: 'CGConv',
+        1: 'EGate',
+        2: 'EAtt',
+        3: 'MGConv'
+    }
+    if 'conv_typ' in params_best.keys():
+        params_best['conv_typ'] = dic_conv_typ[params_best['conv_typ']]
+        if use_line_graph:
+            params_best['conv_typ_lg'] = dic_conv_typ[params_best['conv_typ_lg']]
+    else:
+        params_best['conv_typ_adsb'] = dic_conv_typ[params_best['conv_typ_adsb']]
+        params_best['conv_typ_slab'] = dic_conv_typ[params_best['conv_typ_slab']]
+        if use_line_graph:
+            params_best['conv_typ_adsb_lg'] = dic_conv_typ[params_best['conv_typ_adsb_lg']]
+            params_best['conv_typ_slab_lg'] = dic_conv_typ[params_best['conv_typ_slab_lg']]
+    dic_pool_typ = {
+        0: 'avg',
+        1: 'sum',
+        2: 'cluster'
+    }
+    if 'pool_typ' in params_best.keys():
+        params_best['pool_typ'] = dic_pool_typ[params_best['pool_typ']]
+    else:
+        params_best['pool_typ_adsb'] = dic_pool_typ[params_best['pool_typ_adsb']]
+        params_best['pool_typ_slab'] = dic_pool_typ[params_best['pool_typ_slab']]
+    
+    return params_best, trials
+
+
+# not_freeze_dict=['pred_adsb.layer.0.weight','pred_adsb.layer.0.bias','pred_adsb.layer.1.weight','pred_adsb.layer.1.bias',
 #                 'pred_site.layer.0.weight','pred_site.layer.0.bias','pred_site.layer.1.weight','pred_site.layer.1.bias',]
 #                  'fc_layers.0.layer.0.weight','fc_layers.0.layer.0.bias','fc_layers.0.layer.1.weight','fc_layers.0.layer.1.bias',
 #                  'fc_layers.1.layer.0.weight','fc_layers.1.layer.0.bias','fc_layers.1.layer.1.weight','fc_layers.1.layer.1.bias',
 #                  'fc_layers.2.layer.0.weight','fc_layers.2.layer.0.bias','fc_layers.2.layer.1.weight','fc_layers.2.layer.1.bias',
 #                  'fc_atten_mlp.layer.0.weight','fc_atten_mlp.layer.0.bias','fc_atten_mlp.layer.1.weight','fc_atten_mlp.layer.1.bias',
 #                  'fc_atten_bn.weight','fc_atten_bn.bias']
-#def freeze_model(model, not_freeze_dict):
+# def freeze_model(model, not_freeze_dict):
 #    for (name,param) in model.named_parameters():
 #        if name not in not_freeze_dict:
 #            param.requires_grad=False
 #        else:
 #            pass
 #    return model
-#SA=freeze_model(SA,not_freeze_dict)
+# SA=freeze_model(SA,not_freeze_dict)
