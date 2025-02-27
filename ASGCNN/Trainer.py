@@ -887,6 +887,8 @@ def optimize_hyperparameters(
         num_targets = len(regre_dim)
     elif task_type == 'multy':
         num_targets = len(regre_dim) + len(class_dim)
+        for i in range(len(target_dims)):
+            search_params['weight_t' + str(i)] = hp.uniform('weight_t' + str(i), 0., 1.)
     for i in range(num_targets):
         search_params['fcl_dim_' + str(i)] = hp.quniform('fcl_dim_' + str(i), 16, 124, 4)
         search_params['fcl_dep_' + str(i)] = hp.choice('fcl_dep_' + str(i), [1, 2, 3, 4, 5, 6])
@@ -1005,8 +1007,12 @@ def optimize_hyperparameters(
 
         if task_type == 'regre':
             metric = 'mae'
+            metric_para = {}
         elif task_type == 'multy':
             metric = 'hyb'
+            metric_para = {}
+            for i in range(len(target_dims)):
+                metric_para['weight_t' + str(i)] = params['weight_t' + str(i)]
         t = Trainer(
             Module=model,
             Dataloader_train=Loader_train,
@@ -1016,7 +1022,8 @@ def optimize_hyperparameters(
             weight_decay=0.1**int(params['weight_decay']),
             scheduler='step',
             target_dims=target_dims,
-            metric=metric
+            metric=metric,
+            metric_para=metric_para
         )
         t.train(train_epoch, disable_tqdm=True)
         
